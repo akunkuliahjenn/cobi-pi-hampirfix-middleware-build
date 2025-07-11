@@ -1,9 +1,8 @@
-
 <?php
 // pages/bahan_baku.php
 // Halaman manajemen data bahan baku (CRUD) dengan pagination dan pencarian
 
-require_once __DIR__ . '/../includes/auth_check.php';
+require_once __DIR__ . '/../includes/secure_auth_check.php';
 require_once __DIR__ . '/../includes/user_middleware.php';
 require_once __DIR__ . '/../config/db.php';
 
@@ -31,7 +30,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
                 $whereClause .= " AND name LIKE :search";
                 $whereParams[':search'] = '%' . $searchQueryRaw . '%';
             }
-            
+
             $rawMaterials = selectWithUserId($conn, 'raw_materials', '*', $whereClause, $whereParams, 'name ASC', $rawMaterialsLimit);
 
             // Output raw materials table
@@ -131,7 +130,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
                 $whereClause .= " AND name LIKE :search";
                 $whereParams[':search'] = '%' . $searchQueryPackaging . '%';
             }
-            
+
             $packagingMaterials = selectWithUserId($conn, 'raw_materials', '*', $whereClause, $whereParams, 'name ASC', $packagingMaterialsLimit);
 
             // Output packaging materials table
@@ -192,7 +191,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
                 <div class="text-center py-12 text-gray-500">
                     <svg class="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
-                    </svg>
+                                    </svg>
                     <p class="text-lg font-medium">Belum ada kemasan tercatat</p>
                     <p class="text-sm">Tambahkan kemasan pertama Anda di atas</p>
                 </div>
@@ -368,7 +367,7 @@ function buildPaginationUrl($baseUrl, $paramsToUpdate) {
 
                     <p class="text-sm text-gray-600 mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
                         <svg class="w-4 h-4 inline mr-1 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0016 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
                         </svg>
                         <strong>Catatan:</strong> Form ini untuk menambah bahan/kemasan yang benar-benar baru. Jika bahan sudah ada dan hanya ingin mengubah harga/lainnya, gunakan tombol "Edit" pada daftar di bawah.
                     </p>
@@ -426,14 +425,14 @@ function buildPaginationUrl($baseUrl, $paramsToUpdate) {
                             </div>
                         </div>
 
-                        <div class="flex items-center justify-between mt-8">
+                        <div class="flex items-center mt-8">
                             <button type="submit" id="submit_button" class="flex items-center px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
                                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
                                 </svg>
                                 Tambah Bahan
-                            </button>
-                            <button type="button" id="cancel_edit_button" class="hidden flex items-center px-6 py-3 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 ml-4">
+                                                        </button>
+                            <button type="button" id="cancel_edit_button" class="hidden flex items-center px-6 py-3 bg-white hover:bg-gray-50 text-gray-600 hover:text-gray-800 font-semibold rounded-lg border border-gray-300 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 ml-3">
                                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                                 </svg>
@@ -956,7 +955,7 @@ function checkAndHidePagination(tabType, limit) {
 // Perform AJAX search
 function performAjaxSearch(type, searchValue, limit) {
     const container = type === 'raw' ? document.getElementById('raw-materials-container') : document.getElementById('packaging-materials-container');
-    
+
     if (!container) return;
 
     container.innerHTML = '<div class="flex justify-center items-center py-12"><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div><span class="ml-2 text-gray-600">Memuat...</span></div>';

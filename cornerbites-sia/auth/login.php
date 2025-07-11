@@ -2,10 +2,11 @@
 // auth/login.php
 // Halaman login pengguna yang telah disederhanakan dan dirapikan.
 
-// Memulai sesi jika belum ada.
-if (session_status() == PHP_SESSION_NONE) {
-    session_start();
-}
+// Include auth config terlebih dahulu
+require_once __DIR__ . '/../config/auth_config.php';
+
+// Memulai sesi dengan konfigurasi yang aman
+secureSessionStart();
 
 // Jika pengguna sudah login, alihkan ke dashboard yang sesuai.
 if (isset($_SESSION['user_id'])) {
@@ -91,6 +92,14 @@ unset($_SESSION['success_message_register']);
 
         <!-- Form Login -->
         <form action="/cornerbites-sia/process/login_process.php" method="POST" class="space-y-6">
+            <!-- CSRF Token -->
+            <?php 
+                require_once __DIR__ . '/../config/auth_config.php';
+                secureSessionStart();
+                $csrf_token = generateCSRFToken(); 
+            ?>
+            <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+
             <!-- Username -->
             <div>
                 <label for="username" class="block text-sm font-medium text-white/90 mb-2">Username</label>

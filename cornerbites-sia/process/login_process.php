@@ -1,20 +1,35 @@
 <?php
 // process/login_process.php
-// File ini menangani logika proses login.
+// File ini menangani logika proses login dengan keamanan tinggi.
 
-// Memulai session jika belum dimulai
-if (session_status() == PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/../config/auth_config.php';
+require_once __DIR__ . '/../config/db.php';
 
-require_once __DIR__ . '/../config/db.php'; // Sertakan file koneksi database
+// Start secure session
+secureSessionStart();
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $username = trim($_POST['username'] ?? '');
     $password = trim($_POST['password'] ?? '');
+    $csrf_token = $_POST['csrf_token'] ?? '';
+
+    // Validate CSRF token
+    if (!verifyCSRFToken($csrf_token)) {
+        $_SESSION['error_message'] = 'Username atau password tidak valid. Silakan coba lagi.';
+        header("Location: /cornerbites-sia/auth/login.php");
+        exit();
+    }
 
     if (empty($username) || empty($password)) {
         $_SESSION['error_message'] = 'Username dan password harus diisi.';
+        header("Location: /cornerbites-sia/auth/login.php");
+        exit();
+    }
+
+    // Check rate limiting
+    $login_identifier = hash('sha256', $username . $_SERVER['REMOTE_ADDR']);
+    if (!checkLoginAttempts($login_identifier)) {
+        $_SESSION['error_message'] = 'Terlalu banyak percobaan login. Coba lagi dalam 5 menit.';
         header("Location: /cornerbites-sia/auth/login.php");
         exit();
     }
@@ -29,12 +44,27 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
         // Verifikasi user dan password
         if ($user && password_verify($password, $user['password'])) {
-             
-            // Login berhasil
+
+            // Record successful login attempt
+            recordLoginAttempt($login_identifier, true);
+
+            // Regenerate session ID untuk keamanan
+            session_regenerate_id(true);
+
+            // Generate JWT token
+            $jwt_token = generateJWT($user['id'], $user['username'], $user['role']);
+
+            // Login berhasil - set session dengan token
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['username'] = $user['username'];
-            $_SESSION['user_role'] = $user['role']; // Simpan role di session
-            
+            $_SESSION['user_role'] = $user['role'];
+            $_SESSION['auth_token'] = $jwt_token;
+            $_SESSION['login_time'] = time();
+            $_SESSION['last_activity'] = time();
+
+            // Log successful login (optional)
+            error_log("Successful login: User ID {$user['id']} ({$user['username']}) from IP {$_SERVER['REMOTE_ADDR']}");
+
             // Redirect sesuai role
             if ($user['role'] === 'admin') {
                 header("Location: /cornerbites-sia/admin/dashboard.php");
@@ -43,6 +73,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
             exit();
         } else {
+            // Record failed login attempt
+            recordLoginAttempt($login_identifier, false);
+
+            // Log failed login attempt
+            error_log("Failed login attempt: Username '{$username}' from IP {$_SERVER['REMOTE_ADDR']}");
+
             // Login gagal
             $_SESSION['error_message'] = 'Username atau password salah.';
             header("Location: /cornerbites-sia/auth/login.php");

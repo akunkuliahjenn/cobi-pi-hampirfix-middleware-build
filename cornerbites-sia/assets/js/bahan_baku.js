@@ -1,4 +1,3 @@
-
 // bahan_baku.js
 // JavaScript functions for bahan baku management with AJAX search
 
