@@ -32,10 +32,6 @@ class Database {
             $this->conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             $this->conn->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
-            // Perintah set names utf8 tidak lagi mutlak diperlukan jika charset=utf8 sudah di DSN,
-            // tetapi tidak ada salahnya jika dibiarkan.
-            // $this->conn->exec("set names utf8");
-
             // Debug: Test database connection
             error_log("Database connection successful to: " . $this->db_name);
 
@@ -48,26 +44,8 @@ class Database {
                 error_log("Error checking tables: " . $e->getMessage());
             }
 
-            // Add user_id columns to tables if they don't exist
-            $tables_to_modify = [
-                'products' => 'ALTER TABLE products ADD COLUMN user_id INT(11) NOT NULL DEFAULT 1',
-                'raw_materials' => 'ALTER TABLE raw_materials ADD COLUMN user_id INT(11) NOT NULL DEFAULT 1', 
-                'overhead_costs' => 'ALTER TABLE overhead_costs ADD COLUMN user_id INT(11) NOT NULL DEFAULT 1',
-                'labor_costs' => 'ALTER TABLE labor_costs ADD COLUMN user_id INT(11) NOT NULL DEFAULT 1'
-            ];
-
-            foreach ($tables_to_modify as $table => $alter_query) {
-                // Check if user_id column exists
-                $check_column = $this->conn->prepare("SHOW COLUMNS FROM `$table` LIKE 'user_id'");
-                $check_column->execute();
-
-                if ($check_column->rowCount() == 0) {
-                    $this->conn->exec($alter_query);
-                    // Add foreign key constraint
-                    $this->conn->exec("ALTER TABLE `$table` ADD CONSTRAINT `fk_{$table}_user_id` FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE");
-                }
-            }
-
+            // User isolation sudah ada di database schema
+            error_log("Database connection established with user isolation support");
 
         } catch(PDOException $e) {
             // Tangani error koneksi database
