@@ -8,6 +8,7 @@ error_reporting(E_ALL);
 if (session_status() === PHP_SESSION_NONE) session_start();
 
 require_once __DIR__ . '/../includes/auth_check.php'; // Pastikan user sudah login
+require_once __DIR__ . '/../includes/user_middleware.php'; // Sertakan middleware untuk isolasi data
 require_once __DIR__ . '/../config/db.php'; // Sertakan file koneksi database
 
 try {
@@ -33,29 +34,59 @@ try {
         }
 
         if ($bahan_baku_id) {
-            // Update Bahan Baku
-            $stmt = $conn->prepare("UPDATE raw_materials SET name = ?, brand = ?, type = ?, unit = ?, default_package_quantity = ?, purchase_price_per_unit = ?, updated_at = CURRENT_TIMESTAMP() WHERE id = ?");
-            if ($stmt->execute([$name, $brand, $type, $unit, $purchase_size, $purchase_price_per_unit, $bahan_baku_id])) {
+            // Update Bahan Baku menggunakan middleware
+            $dataToUpdate = [
+                'name' => $name,
+                'brand' => $brand,
+                'type' => $type,
+                'unit' => $unit,
+                'default_package_quantity' => $purchase_size,
+                'purchase_price_per_unit' => $purchase_price_per_unit,
+                'updated_at' => date('Y-m-d H:i:s')
+            ];
+            $whereClause = 'id = :id';
+            $whereParams = [':id' => $bahan_baku_id];
+
+            if (updateWithUserId($conn, 'raw_materials', $dataToUpdate, $whereClause, $whereParams)) {
                 $_SESSION['bahan_baku_message'] = ['text' => 'Bahan baku berhasil diperbarui!', 'type' => 'success'];
             } else {
                 $_SESSION['bahan_baku_message'] = ['text' => 'Gagal memperbarui bahan baku.', 'type' => 'error'];
             }
         } else {
             // Tambah Bahan Baku Baru
-            // Cek duplikasi nama dan brand (boleh sama nama jika brand berbeda)
-            $stmtCheck = $conn->prepare("SELECT COUNT(*) FROM raw_materials WHERE name = ? AND brand = ?");
-            $stmtCheck->execute([$name, $brand]);
-            if ($stmtCheck->fetchColumn() > 0) {
-                $_SESSION['bahan_baku_message'] = ['text' => 'Kombinasi nama dan brand sudah ada. Gunakan kombinasi lain.', 'type' => 'error'];
+            // Cek duplikasi nama dan brand untuk user yang sama menggunakan middleware
+            $duplicateCount = countWithUserId($conn, 'raw_materials', 'name = :name AND brand = :brand', [':name' => $name, ':brand' => $brand]);
+            if ($duplicateCount > 0) {
+                $_SESSION['bahan_baku_message'] = ['text' => 'Anda sudah memiliki bahan baku dengan kombinasi nama dan brand yang sama. Gunakan nama atau brand yang berbeda.', 'type' => 'error'];
                 header("Location: /cornerbites-sia/pages/bahan_baku.php");
                 exit();
             }
 
-            $stmt = $conn->prepare("INSERT INTO raw_materials (name, brand, type, unit, default_package_quantity, purchase_price_per_unit) VALUES (?, ?, ?, ?, ?, ?)");
-            if ($stmt->execute([$name, $brand, $type, $unit, $purchase_size, $purchase_price_per_unit])) {
-                $_SESSION['bahan_baku_message'] = ['text' => 'Bahan baku baru berhasil ditambahkan!', 'type' => 'success'];
-            } else {
-                $_SESSION['bahan_baku_message'] = ['text' => 'Gagal menambahkan bahan baku baru.', 'type' => 'error'];
+            $dataToInsert = [
+                'name' => $name,
+                'brand' => $brand,
+                'type' => $type,
+                'unit' => $unit,
+                'default_package_quantity' => $purchase_size,
+                'purchase_price_per_unit' => $purchase_price_per_unit
+                // user_id akan ditambahkan secara otomatis oleh fungsi insertWithUserId
+            ];
+
+            try {
+                if (insertWithUserId($conn, 'raw_materials', $dataToInsert)) {
+                    $_SESSION['bahan_baku_message'] = ['text' => 'Bahan baku baru berhasil ditambahkan!', 'type' => 'success'];
+                } else {
+                    $_SESSION['bahan_baku_message'] = ['text' => 'Gagal menambahkan bahan baku baru.', 'type' => 'error'];
+                }
+            } catch (PDOException $e) {
+                // Jika masih ada constraint error, berikan pesan yang lebih jelas
+                if (strpos($e->getMessage(), 'Duplicate entry') !== false) {
+                    $_SESSION['bahan_baku_message'] = ['text' => 'Database masih memiliki constraint lama. Silakan jalankan script perbaikan database terlebih dahulu.', 'type' => 'error'];
+                } else {
+                    $_SESSION['bahan_baku_message'] = ['text' => 'Terjadi kesalahan sistem: ' . $e->getMessage(), 'type' => 'error'];
+                }
+                header("Location: /cornerbites-sia/pages/bahan_baku.php");
+                exit();
             }
         }
         // Redirect dengan pesan sukses
@@ -87,17 +118,17 @@ try {
         // --- Proses Hapus Bahan Baku ---
         $bahan_baku_id = (int) $_GET['id'];
 
-        // Cek apakah bahan baku ini digunakan di resep produk mana pun
-        $stmtCheckRecipe = $conn->prepare("SELECT COUNT(*) FROM product_recipes WHERE raw_material_id = ?");
-        $stmtCheckRecipe->execute([$bahan_baku_id]);
-        if ($stmtCheckRecipe->fetchColumn() > 0) {
+        // Cek apakah bahan baku ini digunakan di resep produk mana pun menggunakan middleware
+        $recipeCount = countWithUserId($conn, 'product_recipes', 'raw_material_id = :raw_material_id', [':raw_material_id' => $bahan_baku_id]);
+        if ($recipeCount > 0) {
             $_SESSION['bahan_baku_message'] = ['text' => 'Tidak bisa menghapus bahan baku karena sudah digunakan dalam resep produk. Hapus resep yang menggunakan bahan baku ini terlebih dahulu.', 'type' => 'error'];
             header("Location: /cornerbites-sia/pages/bahan_baku.php");
             exit();
         }
 
-        $stmt = $conn->prepare("DELETE FROM raw_materials WHERE id = ?");
-        if ($stmt->execute([$bahan_baku_id])) {
+        $whereClause = 'id = :id';
+        $whereParams = [':id' => $bahan_baku_id];
+        if (deleteWithUserId($conn, 'raw_materials', $whereClause, $whereParams)) {
             $_SESSION['bahan_baku_message'] = ['text' => 'Bahan baku berhasil dihapus!', 'type' => 'success'];
         } else {
             $_SESSION['bahan_baku_message'] = ['text' => 'Gagal menghapus bahan baku.', 'type' => 'error'];

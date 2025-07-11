@@ -1,8 +1,10 @@
+
 <?php
 // pages/overhead_management.php
 // Halaman manajemen biaya overhead dan tenaga kerja
 
 require_once __DIR__ . '/../includes/auth_check.php';
+require_once __DIR__ . '/../includes/user_middleware.php';
 require_once __DIR__ . '/../config/db.php';
 
 // Pesan sukses atau error setelah proses
@@ -54,22 +56,16 @@ $offset_labor = ($page_labor - 1) * $limit_labor;
 try {
     $conn = $db;
 
-    // Get overhead costs with pagination and search
-    $where_overhead = "WHERE is_active = 1";
+    // Get overhead costs with pagination and search using user middleware
+    $where_overhead = "is_active = 1";
     $params_overhead = [];
     if (!empty($search_overhead)) {
         $where_overhead .= " AND name LIKE :search_overhead";
         $params_overhead[':search_overhead'] = '%' . $search_overhead . '%';
     }
 
-    // Count total overhead
-    $count_query_overhead = "SELECT COUNT(*) FROM overhead_costs " . $where_overhead;
-    $count_stmt_overhead = $conn->prepare($count_query_overhead);
-    foreach ($params_overhead as $key => $value) {
-        $count_stmt_overhead->bindValue($key, $value);
-    }
-    $count_stmt_overhead->execute();
-    $total_overhead = $count_stmt_overhead->fetchColumn();
+    // Count total overhead using middleware
+    $total_overhead = countWithUserId($conn, 'overhead_costs', $where_overhead, $params_overhead);
     $total_pages_overhead = ceil($total_overhead / $limit_overhead);
 
     // Adjust page number if it exceeds total pages
@@ -78,50 +74,30 @@ try {
         $offset_overhead = ($page_overhead - 1) * $limit_overhead;
     }
 
-    // Get overhead data
-    $query_overhead = "SELECT * FROM overhead_costs " . $where_overhead . " ORDER BY name ASC LIMIT :limit OFFSET :offset";
-    $stmt_overhead = $conn->prepare($query_overhead);
-    foreach ($params_overhead as $key => $value) {
-        $stmt_overhead->bindValue($key, $value);
-    }
-    $stmt_overhead->bindValue(':limit', $limit_overhead, PDO::PARAM_INT);
-    $stmt_overhead->bindValue(':offset', $offset_overhead, PDO::PARAM_INT);
-    $stmt_overhead->execute();
+    // Get overhead data using middleware
+    $stmt_overhead = selectWithUserId($conn, 'overhead_costs', '*', $where_overhead, $params_overhead, 'name ASC', "$limit_overhead OFFSET $offset_overhead");
     $overhead_costs = $stmt_overhead->fetchAll(PDO::FETCH_ASSOC);
 
-    // Get labor costs with pagination and search
-    $where_labor = "WHERE is_active = 1";
+    // Get labor costs with pagination and search using middleware
+    $where_labor = "is_active = 1";
     $params_labor = [];
     if (!empty($search_labor)) {
         $where_labor .= " AND position_name LIKE :search_labor";
         $params_labor[':search_labor'] = '%' . $search_labor . '%';
     }
 
-    // Count total labor
-    $count_query_labor = "SELECT COUNT(*) FROM labor_costs " . $where_labor;
-    $count_stmt_labor = $conn->prepare($count_query_labor);
-    foreach ($params_labor as $key => $value) {
-        $count_stmt_labor->bindValue($key, $value);
-    }
-    $count_stmt_labor->execute();
-    $total_labor = $count_stmt_labor->fetchColumn();
+    // Count total labor using middleware
+    $total_labor = countWithUserId($conn, 'labor_costs', $where_labor, $params_labor);
     $total_pages_labor = ceil($total_labor / $limit_labor);
 
-     // Adjust page number if it exceeds total pages
-     if ($page_labor > $total_pages_labor && $total_pages_labor > 0) {
+    // Adjust page number if it exceeds total pages
+    if ($page_labor > $total_pages_labor && $total_pages_labor > 0) {
         $page_labor = $total_pages_labor;
         $offset_labor = ($page_labor - 1) * $limit_labor;
     }
 
-    // Get labor data
-    $query_labor = "SELECT * FROM labor_costs " . $where_labor . " ORDER BY position_name ASC LIMIT :limit OFFSET :offset";
-    $stmt_labor = $conn->prepare($query_labor);
-    foreach ($params_labor as $key => $value) {
-        $stmt_labor->bindValue($key, $value);
-    }
-    $stmt_labor->bindValue(':limit', $limit_labor, PDO::PARAM_INT);
-    $stmt_labor->bindValue(':offset', $offset_labor, PDO::PARAM_INT);
-    $stmt_labor->execute();
+    // Get labor data using middleware
+    $stmt_labor = selectWithUserId($conn, 'labor_costs', '*', $where_labor, $params_labor, 'position_name ASC', "$limit_labor OFFSET $offset_labor");
     $labor_costs = $stmt_labor->fetchAll(PDO::FETCH_ASSOC);
 
 } catch (PDOException $e) {
@@ -191,7 +167,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'overhead') {
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="4" class="px-4 py-8 text-center">
+                        <td colspan="5" class="px-4 py-8 text-center">
                             <div class="flex flex-col items-center">
                                 <svg class="w-8 h-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
@@ -387,252 +363,250 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'labor') {
                     </div>
                 <?php endif; ?>
 
-<!-- Forms Section -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-    <!-- Form Biaya Overhead -->
-    <div class="bg-white rounded-xl shadow-lg border border-gray-100 p-6">
-        <div class="flex items-center mb-6">
-            <div class="p-2 bg-blue-100 rounded-lg mr-3">
-                <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
-            </div>
-            <div>
-                <h3 class="text-xl font-semibold text-gray-900" id="overhead_form_title">Tambah Biaya Overhead Baru</h3>
-                <p class="text-sm text-gray-600 mt-1">Kelola biaya seperti listrik, sewa, dll.</p>
-            </div>
-        </div>
+                <!-- Forms Section -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                    <!-- Form Biaya Overhead -->
+                    <div class="bg-white rounded-xl shadow-lg border border-gray-100 p-6">
+                        <div class="flex items-center mb-6">
+                            <div class="p-2 bg-blue-100 rounded-lg mr-3">
+                                <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+                            </div>
+                            <div>
+                                <h3 class="text-xl font-semibold text-gray-900" id="overhead_form_title">Tambah Biaya Overhead Baru</h3>
+                                <p class="text-sm text-gray-600 mt-1">Kelola biaya seperti listrik, sewa, dll.</p>
+                            </div>
+                        </div>
 
-        <!-- Panduan Terpadu dengan Dropdown (VERSI GABUNGAN) -->
-        <div class="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-2">
-            <details class="group">
-                <summary class="flex items-center justify-between cursor-pointer list-none p-2 rounded-lg hover:bg-gray-100">
-                    <span class="text-sm font-semibold text-gray-800">Panduan Cepat Mengisi Form</span>
-                    <svg class="w-5 h-5 text-gray-500 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                </summary>
-                <div class="mt-2 pl-4 pr-2 pb-2 border-l-2 border-blue-300 space-y-3">
-                    <div>
-                        <strong class="block text-sm text-gray-900">• Jumlah Biaya Total</strong>
-                        <p class="pl-2 text-sm text-gray-700">Masukkan harga total dari item ini. Contoh: Harga 1 tabung gas, atau total tagihan listrik 1 bulan.</p>
-                    </div>
-                    <div>
-                        <strong class="block text-sm text-gray-900">• Metode Alokasi</strong>
-                        <p class="pl-2 text-sm text-gray-700">Pilih cara membagi biaya ini ke setiap produksi. "Per Batch" adalah pilihan paling umum untuk biaya bersama.</p>
-                    </div>
-                    <div>
-                        <strong class="block text-sm text-gray-900">• Estimasi Pemakaian Total</strong>
-                        <p class="pl-2 text-sm text-gray-700">Masukkan "angka pembagi" untuk biaya ini. Lihat contoh di bawah untuk panduan lebih lanjut.</p>
-                    </div>
-                </div>
-            </details>
-
-            <details class="group">
-                <summary class="flex items-center justify-between cursor-pointer list-none p-2 rounded-lg hover:bg-gray-100">
-                    <span class="text-sm font-semibold text-gray-800">Penjelasan Detail Metode Alokasi</span>
-                    <svg class="w-5 h-5 text-gray-500 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                </summary>
-                <div class="mt-2 pl-4 pr-2 pb-2 border-l-2 border-blue-300">
-                    <ul class="list-disc list-inside pl-2 text-sm text-gray-700 space-y-3">
-                        <li>
-                            <strong>Per Batch Produksi (Paling Umum):</strong>
-                            <p class="pl-4 mt-1">Pilih ini untuk biaya yang dipakai bersama oleh banyak produksi dalam sebulan. Ini adalah metode terbaik untuk Listrik, Air, Sewa, Gaji Admin, dan Penyusutan Aset. Sistem akan membagi total biaya dengan total produksi Anda.</p>
-                        </li>
-                        <li>
-                            <strong>Per Unit Produk:</strong>
-                            <p class="pl-4 mt-1">Pilih ini jika biaya berkaitan langsung dengan setiap unit produk yang dihasilkan. Contoh: Biaya royalti resep sebesar Rp 500 untuk setiap kue yang dibuat. Sistem akan mengalikan biaya ini dengan jumlah unit yang dihasilkan.</p>
-                        </li>
-                        <li>
-                            <strong>Persentase dari Penjualan:</strong>
-                             <p class="pl-4 mt-1">Pilih ini untuk biaya yang dihitung berdasarkan persentase dari harga jual. Contoh: Komisi untuk marketplace sebesar 5% dari harga jual produk.</p>
-                        </li>
-                    </ul>
-                </div>
-            </details>
-
-            <details class="group">
-                <summary class="flex items-center justify-between cursor-pointer list-none p-2 rounded-lg hover:bg-gray-100">
-                    <span class="text-sm font-semibold text-gray-800">Contoh Pengisian Biaya Overhead</span>
-                    <svg class="w-5 h-5 text-gray-500 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                </summary>
-                <div class="mt-2 pl-4 pr-2 pb-2 border-l-2 border-blue-300 space-y-3">
-                    <div>
-                        <strong class="block text-sm">• Biaya Habis Pakai (Contoh: Gas LPG):</strong>
-                        <ul class="list-disc list-inside pl-4 text-sm text-gray-700">
-                            <li><strong>Metode Alokasi:</strong> Per Batch Produksi.</li>
-                            <li><strong>Jumlah Biaya Total:</strong> Harga beli 1 tabung gas (misal: 22000).</li>
-                            <li><strong>Estimasi Pemakaian Total:</strong> Kira-kira 1 tabung itu bisa untuk berapa kali masak (misal: 30).</li>
-                        </ul>
-                    </div>
-                    <div>
-                        <strong class="block text-sm">• Biaya Tagihan Bulanan (Listrik, Air, Sewa):</strong>
-                        <ul class="list-disc list-inside pl-4 text-sm text-gray-700">
-                            <li><strong>Metode Alokasi:</strong> Per Batch Produksi.</li>
-                            <li><strong>Jumlah Biaya Total:</strong> Total tagihan bulan lalu (misal: Listrik Rp 150.000).</li>
-                            <li><strong>Estimasi Pemakaian Total:</strong> Total semua batch produksi bulan lalu (misal: 50 kali masak).</li>
-                        </ul>
-                    </div>
-                    <div>
-                        <strong class="block text-sm">• Penyusutan Aset (Mixer, Oven, dll):</strong>
-                        <ul class="list-disc list-inside pl-4 text-sm text-gray-700">
-                            <li><strong>Metode Alokasi:</strong> Per Batch Produksi.</li>
-                            <li><strong>Jumlah Biaya Total:</strong> Hitung dulu biaya per bulannya. Contoh: Mixer Rp 1.200.000 dipakai 2 tahun (24 bulan) = Rp 50.000/bulan. Masukkan `50000`.</li>
-                            <li><strong>Estimasi Pemakaian Total:</strong> Gunakan total batch bulanan yang sama (misal: 50).</li>
-                        </ul>
-                    </div>
-                </div>
-            </details>
-        </div>
-                            <form action="/cornerbites-sia/process/simpan_overhead.php" method="POST">
-                                <input type="hidden" name="type" value="overhead">
-                                <input type="hidden" name="overhead_id" id="overhead_id_to_edit">
-
-                                <div class="space-y-4">
+                        <!-- Panduan Terpadu dengan Dropdown -->
+                        <div class="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-2">
+                            <details class="group">
+                                <summary class="flex items-center justify-between cursor-pointer list-none p-2 rounded-lg hover:bg-gray-100">
+                                    <span class="text-sm font-semibold text-gray-800">Panduan Cepat Mengisi Form</span>
+                                    <svg class="w-5 h-5 text-gray-500 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </summary>
+                                <div class="mt-2 pl-4 pr-2 pb-2 border-l-2 border-blue-300 space-y-3">
                                     <div>
-                                        <label for="overhead_name" class="block text-sm font-semibold text-gray-700 mb-2">Nama Biaya Overhead</label>
-                                        <input type="text" id="overhead_name" name="name" 
-                                               class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200" 
-                                               placeholder="Contoh: Listrik, Sewa Tempat, Internet" required>
+                                        <strong class="block text-sm text-gray-900">• Jumlah Biaya Total</strong>
+                                        <p class="pl-2 text-sm text-gray-700">Masukkan harga total dari item ini. Contoh: Harga 1 tabung gas, atau total tagihan listrik 1 bulan.</p>
                                     </div>
-
                                     <div>
-                                                    <label for="overhead_amount" class="block text-sm font-semibold text-gray-700 mb-2">Jumlah Biaya Total</label>
-                                                    <div class="relative">
-                                                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                                            <span class="text-gray-500 text-sm font-medium">Rp</span>
-                                                        </div>
-                                                        <input type="text" id="overhead_amount" name="amount" 
-                                                            class="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200" 
-                                                            placeholder="500000" required>
-                                                    </div>
-                                                    <p class="text-xs text-gray-500 mt-1">Masukkan total biaya dari item ini (contoh: harga 1 tabung gas, atau total tagihan listrik 1 bulan).</p>
-                                                </div>
-
+                                        <strong class="block text-sm text-gray-900">• Metode Alokasi</strong>
+                                        <p class="pl-2 text-sm text-gray-700">Pilih cara membagi biaya ini ke setiap produksi. "Per Batch" adalah pilihan paling umum untuk biaya bersama.</p>
+                                    </div>
                                     <div>
-                                        <label for="overhead_description" class="block text-sm font-semibold text-gray-700 mb-2">Deskripsi (Opsional)</label>
-                                        <textarea id="overhead_description" name="description" rows="3"
-                                                  class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200" 
-                                                  placeholder="Deskripsi tambahan tentang biaya overhead ini"></textarea>
-                                    </div>
-
-                                    <div class="mb-4">
-                                        <label for="allocation_method" class="block text-sm font-medium text-gray-700 mb-2">Metode Alokasi</label>
-                                        <select id="allocation_method" name="allocation_method" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" required>
-                                            <option value="per_batch">Per Batch Produksi</option>
-                                            <option value="per_unit">Per Unit Produk</option>
-                                            <option value="percentage">Persentase dari Penjualan</option>
-                                        </select>
-                                    </div>
-
-                                    <div class="mb-4">
-                                        <label for="estimated_uses" class="block text-sm font-medium text-gray-700 mb-2">Estimasi Pemakaian Total</label>
-                                        <input type="number" id="estimated_uses" name="estimated_uses" min="1" step="1" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Contoh: 30 (untuk 30 kali pakai)" required>
-                                        <p class="text-xs text-gray-500 mt-1">Biaya ini bisa untuk berapa kali produksi? (contoh: Gas LPG untuk 30 kali masak)</p>
+                                        <strong class="block text-sm text-gray-900">• Estimasi Pemakaian Total</strong>
+                                        <p class="pl-2 text-sm text-gray-700">Masukkan "angka pembagi" untuk biaya ini. Lihat contoh di bawah untuk panduan lebih lanjut.</p>
                                     </div>
                                 </div>
+                            </details>
 
-                                <div class="flex items-center gap-4 mt-6">
-                                    <button type="submit" id="overhead_submit_button" 
-                                            class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-lg shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-200">
-                                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                                        </svg>
-                                        Tambah Overhead
-                                    </button>
-                                    <button type="button" id="overhead_cancel_edit_button" 
-                                            class="hidden inline-flex items-center px-6 py-3 border border-gray-300 text-base font-medium rounded-lg shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition duration-200">
-                                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                        </svg>
-                                        Batal Edit
-                                    </button>
+                            <details class="group">
+                                <summary class="flex items-center justify-between cursor-pointer list-none p-2 rounded-lg hover:bg-gray-100">
+                                    <span class="text-sm font-semibold text-gray-800">Penjelasan Detail Metode Alokasi</span>
+                                    <svg class="w-5 h-5 text-gray-500 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </summary>
+                                <div class="mt-2 pl-4 pr-2 pb-2 border-l-2 border-blue-300">
+                                    <ul class="list-disc list-inside pl-2 text-sm text-gray-700 space-y-3">
+                                        <li>
+                                            <strong>Per Batch Produksi (Paling Umum):</strong>
+                                            <p class="pl-4 mt-1">Pilih ini untuk biaya yang dipakai bersama oleh banyak produksi dalam sebulan. Ini adalah metode terbaik untuk Listrik, Air, Sewa, Gaji Admin, dan Penyusutan Aset. Sistem akan membagi total biaya dengan total produksi Anda.</p>
+                                        </li>
+                                        <li>
+                                            <strong>Per Unit Produk:</strong>
+                                            <p class="pl-4 mt-1">Pilih ini jika biaya berkaitan langsung dengan setiap unit produk yang dihasilkan. Contoh: Biaya royalti resep sebesar Rp 500 untuk setiap kue yang dibuat. Sistem akan mengalikan biaya ini dengan jumlah unit yang dihasilkan.</p>
+                                        </li>
+                                        <li>
+                                            <strong>Persentase dari Penjualan:</strong>
+                                             <p class="pl-4 mt-1">Pilih ini untuk biaya yang dihitung berdasarkan persentase dari harga jual. Contoh: Komisi untuk marketplace sebesar 5% dari harga jual produk.</p>
+                                        </li>
+                                    </ul>
                                 </div>
-                            </form>
-                        </div>
+                            </details>
 
-   <!-- Form Tenaga Kerja -->
-    <div class="bg-white rounded-xl shadow-lg border border-gray-100 p-6">
-        <div class="flex items-center mb-6">
-            <div class="p-2 bg-green-100 rounded-lg mr-3">
-                <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656-.126-1.283-.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-            </div>
-            <div>
-                <h3 class="text-xl font-semibold text-gray-900" id="labor_form_title">Tambah Posisi Tenaga Kerja Baru</h3>
-                <p class="text-sm text-gray-600 mt-1">Kelola data upah tenaga kerja per jam.</p>
-            </div>
-        </div>
-
-        <!-- Note/Arahan untuk Tenaga Kerja -->
-        <div class="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-            <details class="group">
-                <summary class="flex items-center justify-between cursor-pointer list-none p-2 rounded-lg hover:bg-gray-100">
-                    <span class="text-sm font-semibold text-gray-800">Panduan Mengisi Form Tenaga Kerja</span>
-                    <svg class="w-5 h-5 text-gray-500 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                </summary>
-                <div class="mt-2 pl-4 pr-2 pb-2 border-l-2 border-green-300">
-                    <div class="space-y-2 text-sm text-gray-700">
-                        <div>
-                            <strong class="block">• Nama Posisi:</strong>
-                            <span>Contoh: Chef, Barista, Kasir, Helper.</span>
-                        </div>
-                        <div>
-                            <strong class="block">• Upah per Jam:</strong>
-                            <span>Masukkan upah dalam rupiah untuk satu jam kerja.</span>
-                        </div>
-                        <div>
-                            <strong class="block">• Cara Kerja:</strong>
-                            <span>Biaya tenaga kerja dihitung otomatis saat membuat resep, berdasarkan: <strong class="text-gray-800">Upah per Jam × Waktu Produksi (Jam)</strong>.</span>
-                        </div>
-                    </div>
-                </div>
-            </details>
-        </div>
-
-
-                            <form action="/cornerbites-sia/process/simpan_overhead.php" method="POST">
-                                <input type="hidden" name="type" value="labor">
-                                <input type="hidden" name="labor_id" id="labor_id_to_edit">
-
-                                <div class="space-y-4">
+                            <details class="group">
+                                <summary class="flex items-center justify-between cursor-pointer list-none p-2 rounded-lg hover:bg-gray-100">
+                                    <span class="text-sm font-semibold text-gray-800">Contoh Pengisian Biaya Overhead</span>
+                                    <svg class="w-5 h-5 text-gray-500 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </summary>
+                                <div class="mt-2 pl-4 pr-2 pb-2 border-l-2 border-blue-300 space-y-3">
                                     <div>
-                                        <label for="labor_position_name" class="block text-sm font-semibold text-gray-700 mb-2">Nama Posisi/Jabatan</label>
-                                        <input type="text" id="labor_position_name" name="position_name" 
-                                               class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition duration-200" 
-                                               placeholder="Contoh: Chef, Kasir, Pelayan" required>
+                                        <strong class="block text-sm">• Biaya Habis Pakai (Contoh: Gas LPG):</strong>
+                                        <ul class="list-disc list-inside pl-4 text-sm text-gray-700">
+                                            <li><strong>Metode Alokasi:</strong> Per Batch Produksi.</li>
+                                            <li><strong>Jumlah Biaya Total:</strong> Harga beli 1 tabung gas (misal: 22000).</li>
+                                            <li><strong>Estimasi Pemakaian Total:</strong> Kira-kira 1 tabung itu bisa untuk berapa kali masak (misal: 30).</li>
+                                        </ul>
                                     </div>
-
                                     <div>
-                                        <label for="labor_hourly_rate" class="block text-sm font-semibold text-gray-700 mb-2">Upah per Jam</label>
-                                        <div class="relative">
-                                            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                                <span class="text-gray-500 text-sm font-medium">Rp</span>
-                                            </div>
-                                            <input type="text" id="labor_hourly_rate" name="hourly_rate" 
-                                                   class="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition duration-200" 
-                                                   placeholder="15000" required>
+                                        <strong class="block text-sm">• Biaya Tagihan Bulanan (Listrik, Air, Sewa):</strong>
+                                        <ul class="list-disc list-inside pl-4 text-sm text-gray-700">
+                                            <li><strong>Metode Alokasi:</strong> Per Batch Produksi.</li>
+                                            <li><strong>Jumlah Biaya Total:</strong> Total tagihan bulan lalu (misal: Listrik Rp 150.000).</li>
+                                            <li><strong>Estimasi Pemakaian Total:</strong> Total semua batch produksi bulan lalu (misal: 50 kali masak).</li>
+                                        </ul>
+                                    </div>
+                                    <div>
+                                        <strong class="block text-sm">• Penyusutan Aset (Mixer, Oven, dll):</strong>
+                                        <ul class="list-disc list-inside pl-4 text-sm text-gray-700">
+                                            <li><strong>Metode Alokasi:</strong> Per Batch Produksi.</li>
+                                            <li><strong>Jumlah Biaya Total:</strong> Hitung dulu biaya per bulannya. Contoh: Mixer Rp 1.200.000 dipakai 2 tahun (24 bulan) = Rp 50.000/bulan. Masukkan `50000`.</li>
+                                            <li><strong>Estimasi Pemakaian Total:</strong> Gunakan total batch bulanan yang sama (misal: 50).</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
+
+                        <form action="/cornerbites-sia/process/simpan_overhead.php" method="POST">
+                            <input type="hidden" name="type" value="overhead">
+                            <input type="hidden" name="overhead_id" id="overhead_id_to_edit">
+
+                            <div class="space-y-4">
+                                <div>
+                                    <label for="overhead_name" class="block text-sm font-semibold text-gray-700 mb-2">Nama Biaya Overhead</label>
+                                    <input type="text" id="overhead_name" name="name" 
+                                           class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200" 
+                                           placeholder="Contoh: Listrik, Sewa Tempat, Internet" required>
+                                </div>
+
+                                <div>
+                                    <label for="overhead_amount" class="block text-sm font-semibold text-gray-700 mb-2">Jumlah Biaya Total</label>
+                                    <div class="relative">
+                                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                            <span class="text-gray-500 text-sm font-medium">Rp</span>
                                         </div>
-                                        <p class="text-xs text-gray-500 mt-1">Masukkan upah per jam untuk posisi ini</p>
+                                        <input type="text" id="overhead_amount" name="amount" 
+                                               class="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200" 
+                                               placeholder="500000" required>
                                     </div>
+                                    <p class="text-xs text-gray-500 mt-1">Masukkan total biaya dari item ini (contoh: harga 1 tabung gas, atau total tagihan listrik 1 bulan).</p>
                                 </div>
 
-                                <div class="flex items-center gap-4 mt-6">
-                                    <button type="submit" id="labor_submit_button" 
-                                            class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-lg shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-200">
-                                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                                        </svg>
-                                        Tambah Posisi
-                                    </button>
-                                    <button type="button" id="labor_cancel_edit_button" 
-                                            class="hidden inline-flex items-center px-6 py-3 border border-gray-300 text-base font-medium rounded-lg shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition duration-200">
-                                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                        </svg>
-                                        Batal Edit
-                                    </button>
+                                <div>
+                                    <label for="overhead_description" class="block text-sm font-semibold text-gray-700 mb-2">Deskripsi (Opsional)</label>
+                                    <textarea id="overhead_description" name="description" rows="3"
+                                              class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200" 
+                                              placeholder="Deskripsi tambahan tentang biaya overhead ini"></textarea>
                                 </div>
-                            </form>
-                        </div>
+
+                                <div class="mb-4">
+                                    <label for="allocation_method" class="block text-sm font-medium text-gray-700 mb-2">Metode Alokasi</label>
+                                    <select id="allocation_method" name="allocation_method" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" required>
+                                        <option value="per_batch">Per Batch Produksi</option>
+                                        <option value="per_unit">Per Unit Produk</option>
+                                        <option value="percentage">Persentase dari Penjualan</option>
+                                    </select>
+                                </div>
+
+                                <div class="mb-4">
+                                    <label for="estimated_uses" class="block text-sm font-medium text-gray-700 mb-2">Estimasi Pemakaian Total</label>
+                                    <input type="number" id="estimated_uses" name="estimated_uses" min="1" step="1" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Contoh: 30 (untuk 30 kali pakai)" required>
+                                    <p class="text-xs text-gray-500 mt-1">Biaya ini bisa untuk berapa kali produksi? (contoh: Gas LPG untuk 30 kali masak)</p>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center gap-4 mt-6">
+                                <button type="submit" id="overhead_submit_button" 
+                                        class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-lg shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-200">
+                                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                    </svg>
+                                    Tambah Overhead
+                                </button>
+                                <button type="button" id="overhead_cancel_edit_button" 
+                                        class="hidden inline-flex items-center px-6 py-3 border border-gray-300 text-base font-medium rounded-lg shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition duration-200">
+                                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                    Batal Edit
+                                </button>
+                            </div>
+                        </form>
                     </div>
 
-                
+                    <!-- Form Tenaga Kerja -->
+                    <div class="bg-white rounded-xl shadow-lg border border-gray-100 p-6">
+                        <div class="flex items-center mb-6">
+                            <div class="p-2 bg-green-100 rounded-lg mr-3">
+                                <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656-.126-1.283-.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                            </div>
+                            <div>
+                                <h3 class="text-xl font-semibold text-gray-900" id="labor_form_title">Tambah Posisi Tenaga Kerja Baru</h3>
+                                <p class="text-sm text-gray-600 mt-1">Kelola data upah tenaga kerja per jam.</p>
+                            </div>
+                        </div>
+
+                        <!-- Note/Arahan untuk Tenaga Kerja -->
+                        <div class="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                            <details class="group">
+                                <summary class="flex items-center justify-between cursor-pointer list-none p-2 rounded-lg hover:bg-gray-100">
+                                    <span class="text-sm font-semibold text-gray-800">Panduan Mengisi Form Tenaga Kerja</span>
+                                    <svg class="w-5 h-5 text-gray-500 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </summary>
+                                <div class="mt-2 pl-4 pr-2 pb-2 border-l-2 border-green-300">
+                                    <div class="space-y-2 text-sm text-gray-700">
+                                        <div>
+                                            <strong class="block">• Nama Posisi:</strong>
+                                            <span>Contoh: Chef, Barista, Kasir, Helper.</span>
+                                        </div>
+                                        <div>
+                                            <strong class="block">• Upah per Jam:</strong>
+                                            <span>Masukkan upah dalam rupiah untuk satu jam kerja.</span>
+                                        </div>
+                                        <div>
+                                            <strong class="block">• Cara Kerja:</strong>
+                                            <span>Biaya tenaga kerja dihitung otomatis saat membuat resep, berdasarkan: <strong class="text-gray-800">Upah per Jam × Waktu Produksi (Jam)</strong>.</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
+
+                        <form action="/cornerbites-sia/process/simpan_overhead.php" method="POST">
+                            <input type="hidden" name="type" value="labor">
+                            <input type="hidden" name="labor_id" id="labor_id_to_edit">
+
+                            <div class="space-y-4">
+                                <div>
+                                    <label for="labor_position_name" class="block text-sm font-semibold text-gray-700 mb-2">Nama Posisi/Jabatan</label>
+                                    <input type="text" id="labor_position_name" name="position_name" 
+                                           class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition duration-200" 
+                                           placeholder="Contoh: Chef, Kasir, Pelayan" required>
+                                </div>
+
+                                <div>
+                                    <label for="labor_hourly_rate" class="block text-sm font-semibold text-gray-700 mb-2">Upah per Jam</label>
+                                    <div class="relative">
+                                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                            <span class="text-gray-500 text-sm font-medium">Rp</span>
+                                        </div>
+                                        <input type="text" id="labor_hourly_rate" name="hourly_rate" 
+                                               class="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition duration-200" 
+                                               placeholder="15000" required>
+                                    </div>
+                                    <p class="text-xs text-gray-500 mt-1">Masukkan upah per jam untuk posisi ini</p>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center gap-4 mt-6">
+                                <button type="submit" id="labor_submit_button" 
+                                        class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-lg shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-200">
+                                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                    </svg>
+                                    Tambah Posisi
+                                </button>
+                                <button type="button" id="labor_cancel_edit_button" 
+                                        class="hidden inline-flex items-center px-6 py-3 border border-gray-300 text-base font-medium rounded-lg shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition duration-200">
+                                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                    Batal Edit
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
 
                 <!-- Daftar Overhead & Tenaga Kerja dengan Tab Navigation -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -665,9 +639,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'labor') {
                                 </div>
                                 <div class="text-xs text-blue-600">
                                     <?php 
-                                    $total_overhead_amount_query = "SELECT SUM(amount) FROM overhead_costs WHERE is_active = 1";
-                                    $total_overhead_amount_stmt = $conn->prepare($total_overhead_amount_query);
-                                    $total_overhead_amount_stmt->execute();
+                                    // Calculate total overhead amount using middleware
+                                    $total_overhead_amount_stmt = selectWithUserId($conn, 'overhead_costs', 'SUM(amount) as total', 'is_active = 1');
                                     $total_overhead_amount = $total_overhead_amount_stmt->fetchColumn() ?: 0;
                                     ?>
                                     Total Biaya: Rp <?php echo number_format($total_overhead_amount, 0, ',', '.'); ?>
@@ -689,9 +662,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'labor') {
                                 </div>
                                 <div class="text-xs text-gray-500">
                                     <?php 
-                                    $avg_labor_rate_query = "SELECT AVG(hourly_rate) FROM labor_costs WHERE is_active = 1";
-                                    $avg_labor_rate_stmt = $conn->prepare($avg_labor_rate_query);
-                                    $avg_labor_rate_stmt->execute();
+                                    // Calculate average labor rate using middleware
+                                    $avg_labor_rate_stmt = selectWithUserId($conn, 'labor_costs', 'AVG(hourly_rate) as avg_rate', 'is_active = 1');
                                     $avg_labor_rate = $avg_labor_rate_stmt->fetchColumn() ?: 0;
                                     ?>
                                     Rata-rata Upah/Jam: Rp <?php echo number_format($avg_labor_rate, 0, ',', '.'); ?>
@@ -699,6 +671,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'labor') {
                             </div>
                         </button>
                     </div>
+
                     <!-- Tab Content: Biaya Overhead -->
                     <div id="content-overhead" class="tab-content" role="tabpanel">
                         <!-- Filter & Pencarian Biaya Overhead -->
@@ -887,15 +860,16 @@ function showTab(tabName) {
         loadLaborData(1);
     }
 }
-    // Initialize data loading when page loads
-    document.addEventListener('DOMContentLoaded', function() {
-        // Load initial data
-        loadOverheadData(<?php echo $page_overhead; ?>);
-        loadLaborData(<?php echo $page_labor; ?>);
 
-        // Show overhead tab by default
-        showTab('overhead');
-    });
+// Initialize data loading when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Load initial data
+    loadOverheadData(<?php echo $page_overhead; ?>);
+    loadLaborData(<?php echo $page_labor; ?>);
+
+    // Show overhead tab by default
+    showTab('overhead');
+});
 </script>
 
 <?php include_once __DIR__ . '/../includes/footer.php'; ?>

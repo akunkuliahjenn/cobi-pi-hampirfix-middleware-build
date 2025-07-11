@@ -4,6 +4,7 @@
 // Halaman manajemen data bahan baku (CRUD) dengan pagination dan pencarian
 
 require_once __DIR__ . '/../includes/auth_check.php';
+require_once __DIR__ . '/../includes/user_middleware.php';
 require_once __DIR__ . '/../config/db.php';
 
 // Handle AJAX request
@@ -19,33 +20,19 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
         try {
             $conn = $db;
 
-            // Count total for pagination logic
-            $queryCountRaw = "SELECT COUNT(*) FROM raw_materials rm WHERE rm.type = 'bahan'";
-            if (!empty($searchQueryRaw)) {
-                $queryCountRaw .= " AND rm.name LIKE :search_raw_term";
-            }
-            $stmtCountRaw = $conn->prepare($queryCountRaw);
-            if (!empty($searchQueryRaw)) {
-                $stmtCountRaw->bindValue(':search_raw_term', '%' . $searchQueryRaw . '%', PDO::PARAM_STR);
-            }
-            $stmtCountRaw->execute();
-            $totalRawCount = $stmtCountRaw->fetchColumn();
+            // Count total for pagination logic dengan user isolation
+            $totalRawCount = countWithUserId($conn, 'raw_materials', "type = 'bahan'" . (!empty($searchQueryRaw) ? " AND name LIKE :search" : ""), 
+                !empty($searchQueryRaw) ? [':search' => '%' . $searchQueryRaw . '%'] : []);
 
-            $queryRaw = "SELECT rm.id, rm.name, rm.brand, rm.unit, rm.purchase_price_per_unit, rm.default_package_quantity, rm.type
-                         FROM raw_materials rm
-                         WHERE rm.type = 'bahan'";
+            // Get raw materials dengan user isolation
+            $whereClause = "type = 'bahan'";
+            $whereParams = [];
             if (!empty($searchQueryRaw)) {
-                $queryRaw .= " AND rm.name LIKE :search_raw_term";
+                $whereClause .= " AND name LIKE :search";
+                $whereParams[':search'] = '%' . $searchQueryRaw . '%';
             }
-            $queryRaw .= " ORDER BY rm.name ASC LIMIT :limit";
-
-            $stmtRaw = $conn->prepare($queryRaw);
-            if (!empty($searchQueryRaw)) {
-                $stmtRaw->bindValue(':search_raw_term', '%' . $searchQueryRaw . '%', PDO::PARAM_STR);
-            }
-            $stmtRaw->bindParam(':limit', $rawMaterialsLimit, PDO::PARAM_INT);
-            $stmtRaw->execute();
-            $rawMaterials = $stmtRaw->fetchAll(PDO::FETCH_ASSOC);
+            
+            $rawMaterials = selectWithUserId($conn, 'raw_materials', '*', $whereClause, $whereParams, 'name ASC', $rawMaterialsLimit);
 
             // Output raw materials table
             if (!empty($rawMaterials)): ?>
@@ -119,9 +106,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
             echo '<script>setTimeout(() => { checkAndHidePagination("raw", ' . $rawMaterialsLimit . '); }, 100);</script>';
 
             // Update tab badge for bahan
-            $stmtBadgeBahan = $conn->prepare("SELECT COUNT(*) FROM raw_materials WHERE type = 'bahan'");
-            $stmtBadgeBahan->execute();
-            $totalBahanForBadge = $stmtBadgeBahan->fetchColumn();
+            $totalBahanForBadge = countWithUserId($conn, 'raw_materials', "type = 'bahan'");
             echo '<script>document.getElementById("badge-bahan").textContent = ' . $totalBahanForBadge . ';</script>';
 
         } catch (PDOException $e) {
@@ -135,33 +120,19 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
         try {
             $conn = $db;
 
-            // Count total for pagination logic
-            $queryCountPackaging = "SELECT COUNT(*) FROM raw_materials rm WHERE rm.type = 'kemasan'";
-            if (!empty($searchQueryPackaging)) {
-                $queryCountPackaging .= " AND rm.name LIKE :search_kemasan_term";
-            }
-            $stmtCountPackaging = $conn->prepare($queryCountPackaging);
-            if (!empty($searchQueryPackaging)) {
-                $stmtCountPackaging->bindValue(':search_kemasan_term', '%' . $searchQueryPackaging . '%', PDO::PARAM_STR);
-            }
-            $stmtCountPackaging->execute();
-            $totalKemasanCount = $stmtCountPackaging->fetchColumn();
+            // Count total for pagination logic dengan user isolation
+            $totalKemasanCount = countWithUserId($conn, 'raw_materials', "type = 'kemasan'" . (!empty($searchQueryPackaging) ? " AND name LIKE :search" : ""), 
+                !empty($searchQueryPackaging) ? [':search' => '%' . $searchQueryPackaging . '%'] : []);
 
-            $queryPackaging = "SELECT rm.id, rm.name, rm.brand, rm.unit, rm.purchase_price_per_unit, rm.default_package_quantity, rm.type
-                       FROM raw_materials rm
-                       WHERE rm.type = 'kemasan'";
+            // Get packaging materials dengan user isolation
+            $whereClause = "type = 'kemasan'";
+            $whereParams = [];
             if (!empty($searchQueryPackaging)) {
-                $queryPackaging .= " AND rm.name LIKE :search_kemasan_term";
+                $whereClause .= " AND name LIKE :search";
+                $whereParams[':search'] = '%' . $searchQueryPackaging . '%';
             }
-            $queryPackaging .= " ORDER BY rm.name ASC LIMIT :limit";
-
-            $stmtPackaging = $conn->prepare($queryPackaging);
-            if (!empty($searchQueryPackaging)) {
-                $stmtPackaging->bindValue(':search_kemasan_term', '%' . $searchQueryPackaging . '%', PDO::PARAM_STR);
-            }
-            $stmtPackaging->bindParam(':limit', $packagingMaterialsLimit, PDO::PARAM_INT);
-            $stmtPackaging->execute();
-            $packagingMaterials = $stmtPackaging->fetchAll(PDO::FETCH_ASSOC);
+            
+            $packagingMaterials = selectWithUserId($conn, 'raw_materials', '*', $whereClause, $whereParams, 'name ASC', $packagingMaterialsLimit);
 
             // Output packaging materials table
             if (!empty($packagingMaterials)): ?>
@@ -235,9 +206,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
             echo '<script>setTimeout(() => { checkAndHidePagination("kemasan", ' . $packagingMaterialsLimit . '); }, 100);</script>';
 
             // Update tab badge for kemasan
-            $stmtBadgeKemasan = $conn->prepare("SELECT COUNT(*) FROM raw_materials WHERE type = 'kemasan'");
-            $stmtBadgeKemasan->execute();
-            $totalKemasanForBadge = $stmtBadgeKemasan->fetchColumn();
+            $totalKemasanForBadge = countWithUserId($conn, 'raw_materials', "type = 'kemasan'");
             echo '<script>document.getElementById("badge-kemasan").textContent = ' . $totalKemasanForBadge . ';</script>';
         } catch (PDOException $e) {
             echo '<div class="col-span-full text-center py-12 text-red-600">Terjadi kesalahan saat memuat data kemasan: ' . htmlspecialchars($e->getMessage()) . '</div>';
@@ -278,17 +247,14 @@ $rawMaterialsOffset = ($rawMaterialsPage - 1) * $rawMaterialsLimit;
 try {
     $conn = $db;
 
-    // Hitung total baris untuk bahan baku dengan filter pencarian
-    $queryTotalRaw = "SELECT COUNT(*) FROM raw_materials WHERE type = 'bahan'";
+    // Count total bahan baku dengan user isolation
+    $whereClauseCount = "type = 'bahan'";
+    $whereParamsCount = [];
     if (!empty($searchQueryRaw)) {
-        $queryTotalRaw .= " AND name LIKE :search_raw_term";
+        $whereClauseCount .= " AND name LIKE :search";
+        $whereParamsCount[':search'] = '%' . $searchQueryRaw . '%';
     }
-    $stmtTotalRaw = $conn->prepare($queryTotalRaw);
-    if (!empty($searchQueryRaw)) {
-        $stmtTotalRaw->bindValue(':search_raw_term', '%' . $searchQueryRaw . '%', PDO::PARAM_STR);
-    }
-    $stmtTotalRaw->execute();
-    $totalRawMaterialsRows = $stmtTotalRaw->fetchColumn();
+    $totalRawMaterialsRows = countWithUserId($conn, 'raw_materials', $whereClauseCount, $whereParamsCount);
     $totalRawMaterialsPages = ceil($totalRawMaterialsRows / $rawMaterialsLimit);
 
     // Pastikan halaman tidak melebihi total halaman yang ada untuk bahan baku
@@ -297,23 +263,14 @@ try {
         $rawMaterialsOffset = ($rawMaterialsPage - 1) * $rawMaterialsLimit;
     }
 
-    // Query untuk mengambil bahan baku
-    $queryRaw = "SELECT rm.id, rm.name, rm.brand, rm.unit, rm.purchase_price_per_unit, rm.default_package_quantity, rm.type
-                 FROM raw_materials rm
-                 WHERE rm.type = 'bahan'";
+    // Get bahan baku dengan user isolation
+    $whereClause = "type = 'bahan'";
+    $whereParams = [];
     if (!empty($searchQueryRaw)) {
-        $queryRaw .= " AND rm.name LIKE :search_raw_term";
+        $whereClause .= " AND name LIKE :search";
+        $whereParams[':search'] = '%' . $searchQueryRaw . '%';
     }
-    $queryRaw .= " ORDER BY rm.name ASC LIMIT :limit OFFSET :offset";
-
-    $stmtRaw = $conn->prepare($queryRaw);
-    if (!empty($searchQueryRaw)) {
-        $stmtRaw->bindValue(':search_raw_term', '%' . $searchQueryRaw . '%', PDO::PARAM_STR);
-    }
-    $stmtRaw->bindParam(':limit', $rawMaterialsLimit, PDO::PARAM_INT);
-    $stmtRaw->bindParam(':offset', $rawMaterialsOffset, PDO::PARAM_INT);
-    $stmtRaw->execute();
-    $rawMaterials = $stmtRaw->fetchAll(PDO::FETCH_ASSOC);
+    $rawMaterials = selectWithUserId($conn, 'raw_materials', '*', $whereClause, $whereParams, 'name ASC', $rawMaterialsLimit, $rawMaterialsOffset);
 
 } catch (PDOException $e) {
     error_log("Error di halaman Bahan Baku (fetch bahan): " . $e->getMessage());
@@ -331,17 +288,14 @@ $packagingMaterialsPage = isset($_GET['kemasan_page']) ? max((int)$_GET['kemasan
 $packagingMaterialsOffset = ($packagingMaterialsPage - 1) * $packagingMaterialsLimit;
 
 try {
-    // Hitung total baris untuk kemasan dengan filter pencarian
-    $queryTotalPackaging = "SELECT COUNT(*) FROM raw_materials WHERE type = 'kemasan'";
+    // Count total kemasan dengan user isolation
+    $whereClauseCount = "type = 'kemasan'";
+    $whereParamsCount = [];
     if (!empty($searchQueryPackaging)) {
-        $queryTotalPackaging .= " AND name LIKE :search_kemasan_term";
+        $whereClauseCount .= " AND name LIKE :search";
+        $whereParamsCount[':search'] = '%' . $searchQueryPackaging . '%';
     }
-    $stmtTotalPackaging = $conn->prepare($queryTotalPackaging);
-    if (!empty($searchQueryPackaging)) {
-        $stmtTotalPackaging->bindValue(':search_kemasan_term', '%' . $searchQueryPackaging . '%', PDO::PARAM_STR);
-    }
-    $stmtTotalPackaging->execute();
-    $totalPackagingMaterialsRows = $stmtTotalPackaging->fetchColumn();
+    $totalPackagingMaterialsRows = countWithUserId($conn, 'raw_materials', $whereClauseCount, $whereParamsCount);
     $totalPackagingMaterialsPages = ceil($totalPackagingMaterialsRows / $packagingMaterialsLimit);
 
     // Pastikan halaman tidak melebihi total halaman yang ada untuk kemasan
@@ -350,23 +304,14 @@ try {
         $packagingMaterialsOffset = ($packagingMaterialsPage - 1) * $packagingMaterialsLimit;
     }
 
-    // Query untuk mengambil kemasan
-    $queryPackaging = "SELECT rm.id, rm.name, rm.brand, rm.unit, rm.purchase_price_per_unit, rm.default_package_quantity, rm.type
-                       FROM raw_materials rm
-                       WHERE rm.type = 'kemasan'";
+    // Get kemasan dengan user isolation
+    $whereClause = "type = 'kemasan'";
+    $whereParams = [];
     if (!empty($searchQueryPackaging)) {
-        $queryPackaging .= " AND name LIKE :search_kemasan_term";
+        $whereClause .= " AND name LIKE :search";
+        $whereParams[':search'] = '%' . $searchQueryPackaging . '%';
     }
-    $queryPackaging .= " ORDER BY rm.name ASC LIMIT :limit OFFSET :offset";
-
-    $stmtPackaging = $conn->prepare($queryPackaging);
-    if (!empty($searchQueryPackaging)) {
-        $stmtPackaging->bindValue(':search_kemasan_term', '%' . $searchQueryPackaging . '%', PDO::PARAM_STR);
-    }
-    $stmtPackaging->bindParam(':limit', $packagingMaterialsLimit, PDO::PARAM_INT);
-    $stmtPackaging->bindParam(':offset', $packagingMaterialsOffset, PDO::PARAM_INT);
-    $stmtPackaging->execute();
-    $packagingMaterials = $stmtPackaging->fetchAll(PDO::FETCH_ASSOC);
+    $packagingMaterials = selectWithUserId($conn, 'raw_materials', '*', $whereClause, $whereParams, 'name ASC', $packagingMaterialsLimit, $packagingMaterialsOffset);
 
 } catch (PDOException $e) {
     error_log("Error di halaman Bahan Baku (fetch kemasan): " . $e->getMessage());
@@ -475,7 +420,7 @@ function buildPaginationUrl($baseUrl, $paramsToUpdate) {
                                 <label for="purchase_price_per_unit" class="block text-gray-700 text-sm font-semibold mb-2" id="purchase_price_label">Harga Beli Per Kemasan</label>
                                 <div class="relative">
                                     <span class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 font-medium">Rp</span>
-                                    <input type="text" id="purchase_price_per_unit" name="purchase_price_per_unit" class="w-full pl-10 pr-4 py-3 border bordergray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors" placeholder="15000" required>
+                                    <input type="text" id="purchase_price_per_unit" name="purchase_price_per_unit" class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors" placeholder="15000" required>
                                 </div>
                                 <p class="text-xs text-gray-500 mt-1" id="purchase_price_help">Harga per kemasan saat pembelian</p>
                             </div>
@@ -488,7 +433,7 @@ function buildPaginationUrl($baseUrl, $paramsToUpdate) {
                                 </svg>
                                 Tambah Bahan
                             </button>
-                            <button type="button" id="cancel_edit_button" class="hidden flex items-center px-6 py-3 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg transitioncolors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 ml-4">
+                            <button type="button" id="cancel_edit_button" class="hidden flex items-center px-6 py-3 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 ml-4">
                                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                                 </svg>
@@ -986,7 +931,7 @@ function updateTotalCount(elementId, count) {
 }
 
 // Function to hide pagination if not needed (AJAX version)
-function hidePaginationIfNotNeeded(tabType, limit) {
+function checkAndHidePagination(tabType, limit) {
     let totalCount;
     let paginationElement;
 
@@ -1008,6 +953,64 @@ function hidePaginationIfNotNeeded(tabType, limit) {
     }
 }
 
+// Perform AJAX search
+function performAjaxSearch(type, searchValue, limit) {
+    const container = type === 'raw' ? document.getElementById('raw-materials-container') : document.getElementById('packaging-materials-container');
+    
+    if (!container) return;
+
+    container.innerHTML = '<div class="flex justify-center items-center py-12"><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div><span class="ml-2 text-gray-600">Memuat...</span></div>';
+
+    const params = new URLSearchParams({
+        ajax: '1',
+        ajax_type: type,
+        [type === 'raw' ? 'search_raw' : 'search_kemasan']: searchValue,
+        [type === 'raw' ? 'bahan_limit' : 'kemasan_limit']: limit
+    });
+
+    fetch(`bahan_baku.php?${params.toString()}`)
+        .then(response => response.text())
+        .then(html => {
+            container.innerHTML = html;
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            container.innerHTML = '<div class="text-center py-12 text-red-600">Terjadi kesalahan saat memuat data</div>';
+        });
+}
+
+// Event listeners for search and limit changes
+document.addEventListener('DOMContentLoaded', function() {
+    // Search input events
+    const searchRaw = document.getElementById('search_raw');
+    const searchKemasan = document.getElementById('search_kemasan');
+    const limitBahan = document.getElementById('bahan_limit');
+    const limitKemasan = document.getElementById('kemasan_limit');
+
+    if (searchRaw) {
+        searchRaw.addEventListener('input', function() {
+            performAjaxSearch('raw', this.value, limitBahan.value);
+        });
+    }
+
+    if (searchKemasan) {
+        searchKemasan.addEventListener('input', function() {
+            performAjaxSearch('kemasan', this.value, limitKemasan.value);
+        });
+    }
+
+    if (limitBahan) {
+        limitBahan.addEventListener('change', function() {
+            performAjaxSearch('raw', searchRaw.value, this.value);
+        });
+    }
+
+    if (limitKemasan) {
+        limitKemasan.addEventListener('change', function() {
+            performAjaxSearch('kemasan', searchKemasan.value, this.value);
+        });
+    }
+});
 </script>
 
 <?php include_once __DIR__ . '/../includes/footer.php'; ?>

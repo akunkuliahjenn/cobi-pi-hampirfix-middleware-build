@@ -1,144 +1,157 @@
+
 <?php
 // process/fix_user_isolation.php
-// Script untuk memperbaiki isolasi data user yang sudah ada
+// Script untuk memperbaiki isolasi user dan constraint database
 
-session_start();
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
+
 require_once __DIR__ . '/../config/db.php';
-
-echo "<h2>Memperbaiki Isolasi Data User...</h2>";
 
 try {
     $conn = $db;
     
-    // Daftar user yang ada
-    $users_stmt = $conn->query("SELECT id, username, role FROM users ORDER BY id");
-    $users = $users_stmt->fetchAll(PDO::FETCH_ASSOC);
+    echo "<h2>Memperbaiki Database untuk User Isolation</h2>";
     
-    echo "<h3>User yang ditemukan:</h3>";
-    foreach ($users as $user) {
-        echo "<p>ID: {$user['id']}, Username: {$user['username']}, Role: {$user['role']}</p>";
+    // 1. Drop existing unique constraints yang bermasalah
+    echo "<p>Menghapus constraint UNIQUE yang bermasalah...</p>";
+    
+    try {
+        // Drop unique constraint pada name di raw_materials
+        $conn->exec("ALTER TABLE raw_materials DROP INDEX name");
+        echo "✓ Constraint UNIQUE pada kolom 'name' di tabel raw_materials berhasil dihapus<br>";
+    } catch (PDOException $e) {
+        if (strpos($e->getMessage(), "check that column/key exists") !== false) {
+            echo "- Constraint UNIQUE pada kolom 'name' sudah tidak ada<br>";
+        } else {
+            echo "⚠ Error saat menghapus constraint: " . $e->getMessage() . "<br>";
+        }
     }
     
-    echo "<hr>";
+    try {
+        // Drop unique constraint pada name di products jika ada
+        $conn->exec("ALTER TABLE products DROP INDEX name");
+        echo "✓ Constraint UNIQUE pada kolom 'name' di tabel products berhasil dihapus<br>";
+    } catch (PDOException $e) {
+        if (strpos($e->getMessage(), "check that column/key exists") !== false) {
+            echo "- Constraint UNIQUE pada kolom 'name' di tabel products sudah tidak ada<br>";
+        } else {
+            echo "⚠ Error saat menghapus constraint: " . $e->getMessage() . "<br>";
+        }
+    }
     
-    // Tables yang perlu diperbaiki
-    $tables = [
-        'products',
-        'raw_materials', 
-        'overhead_costs',
-        'labor_costs',
-        'product_recipes',
-        'product_labor_manual',
-        'product_overhead_manual'
-    ];
-
-    echo "<h3>Status Data Per Tabel:</h3>";
+    // 2. Tambah constraint UNIQUE yang tepat dengan user_id
+    echo "<p>Menambahkan constraint UNIQUE yang tepat dengan user_id...</p>";
+    
+    try {
+        // Tambah unique constraint untuk kombinasi name + brand + user_id di raw_materials
+        $conn->exec("ALTER TABLE raw_materials ADD UNIQUE KEY unique_material_per_user (name, brand, user_id)");
+        echo "✓ Constraint UNIQUE (name, brand, user_id) berhasil ditambahkan ke tabel raw_materials<br>";
+    } catch (PDOException $e) {
+        if (strpos($e->getMessage(), "Duplicate entry") !== false) {
+            echo "⚠ Ada data duplikat, membersihkan data duplikat terlebih dahulu...<br>";
+            
+            // Hapus duplikat dengan menyimpan yang paling baru
+            $stmt = $conn->prepare("
+                DELETE rm1 FROM raw_materials rm1
+                INNER JOIN raw_materials rm2 
+                WHERE rm1.id < rm2.id 
+                AND rm1.name = rm2.name 
+                AND rm1.brand = rm2.brand 
+                AND rm1.user_id = rm2.user_id
+            ");
+            $stmt->execute();
+            echo "✓ Data duplikat berhasil dibersihkan<br>";
+            
+            // Coba lagi tambah constraint
+            try {
+                $conn->exec("ALTER TABLE raw_materials ADD UNIQUE KEY unique_material_per_user (name, brand, user_id)");
+                echo "✓ Constraint UNIQUE (name, brand, user_id) berhasil ditambahkan ke tabel raw_materials<br>";
+            } catch (PDOException $e2) {
+                echo "⚠ Masih error: " . $e2->getMessage() . "<br>";
+            }
+        } else if (strpos($e->getMessage(), "Duplicate key name") !== false) {
+            echo "- Constraint UNIQUE (name, brand, user_id) sudah ada di tabel raw_materials<br>";
+        } else {
+            echo "⚠ Error: " . $e->getMessage() . "<br>";
+        }
+    }
+    
+    try {
+        // Tambah unique constraint untuk kombinasi name + user_id di products
+        $conn->exec("ALTER TABLE products ADD UNIQUE KEY unique_product_per_user (name, user_id)");
+        echo "✓ Constraint UNIQUE (name, user_id) berhasil ditambahkan ke tabel products<br>";
+    } catch (PDOException $e) {
+        if (strpos($e->getMessage(), "Duplicate entry") !== false) {
+            echo "⚠ Ada data duplikat di products, membersihkan...<br>";
+            
+            // Hapus duplikat produk
+            $stmt = $conn->prepare("
+                DELETE p1 FROM products p1
+                INNER JOIN products p2 
+                WHERE p1.id < p2.id 
+                AND p1.name = p2.name 
+                AND p1.user_id = p2.user_id
+            ");
+            $stmt->execute();
+            echo "✓ Data duplikat produk berhasil dibersihkan<br>";
+            
+            // Coba lagi
+            try {
+                $conn->exec("ALTER TABLE products ADD UNIQUE KEY unique_product_per_user (name, user_id)");
+                echo "✓ Constraint UNIQUE (name, user_id) berhasil ditambahkan ke tabel products<br>";
+            } catch (PDOException $e2) {
+                echo "⚠ Masih error: " . $e2->getMessage() . "<br>";
+            }
+        } else if (strpos($e->getMessage(), "Duplicate key name") !== false) {
+            echo "- Constraint UNIQUE (name, user_id) sudah ada di tabel products<br>";
+        } else {
+            echo "⚠ Error: " . $e->getMessage() . "<br>";
+        }
+    }
+    
+    // 3. Pastikan semua tabel memiliki kolom user_id dan default value yang tepat
+    echo "<p>Memastikan struktur tabel sudah benar...</p>";
+    
+    $tables = ['users', 'products', 'raw_materials', 'product_recipes', 'overhead_costs', 'labor_costs'];
     
     foreach ($tables as $table) {
-        // Check if table exists
-        $check_table = $conn->prepare("SHOW TABLES LIKE '$table'");
-        $check_table->execute();
+        if ($table === 'users') continue; // Skip users table
         
-        if ($check_table->rowCount() > 0) {
-            // Check if user_id column exists
-            $check_column = $conn->prepare("SHOW COLUMNS FROM `$table` LIKE 'user_id'");
-            $check_column->execute();
-            
-            if ($check_column->rowCount() > 0) {
-                // Count records per user
-                $count_stmt = $conn->prepare("SELECT user_id, COUNT(*) as count FROM `$table` GROUP BY user_id ORDER BY user_id");
-                $count_stmt->execute();
-                $counts = $count_stmt->fetchAll(PDO::FETCH_ASSOC);
-                
-                echo "<h4>Tabel: $table</h4>";
-                foreach ($counts as $count) {
-                    $user_info = array_filter($users, function($u) use ($count) {
-                        return $u['id'] == $count['user_id'];
-                    });
-                    $user_info = reset($user_info);
-                    $username = $user_info ? $user_info['username'] : 'Unknown';
-                    echo "<p>User ID {$count['user_id']} ({$username}): {$count['count']} records</p>";
-                }
-                
-                // Check for records with user_id = 1 that should be distributed
-                $admin_records = $conn->prepare("SELECT COUNT(*) FROM `$table` WHERE user_id = 1");
-                $admin_records->execute();
-                $admin_count = $admin_records->fetchColumn();
-                
-                if ($admin_count > 0) {
-                    echo "<p style='color: orange;'>⚠️ {$admin_count} records dengan user_id = 1 (mungkin perlu didistribusi)</p>";
-                }
-                
-            } else {
-                echo "<p style='color: red;'>❌ Tabel $table: kolom user_id tidak ditemukan</p>";
-            }
+        // Cek apakah kolom user_id sudah ada
+        $stmt = $conn->prepare("SHOW COLUMNS FROM $table LIKE 'user_id'");
+        $stmt->execute();
+        $result = $stmt->fetch();
+        
+        if (!$result) {
+            // Tambah kolom user_id jika belum ada
+            $conn->exec("ALTER TABLE $table ADD COLUMN user_id INT DEFAULT 1");
+            echo "✓ Kolom user_id ditambahkan ke tabel $table<br>";
         } else {
-            echo "<p style='color: gray;'>⚪ Tabel $table: tidak ditemukan</p>";
+            echo "- Kolom user_id sudah ada di tabel $table<br>";
         }
-        echo "<br>";
-    }
-    
-    echo "<hr>";
-    echo "<h3>Rekomendasi Perbaikan:</h3>";
-    echo "<p>1. Semua data saat ini memiliki user_id = 1 (admin)</p>";
-    echo "<p>2. Untuk testing, buat data baru dengan user yang berbeda</p>";
-    echo "<p>3. Atau gunakan form di bawah untuk memindahkan data ke user tertentu</p>";
-    
-    // Form untuk memindahkan data
-    echo "<hr>";
-    echo "<h3>Pindahkan Data ke User Lain (Opsional):</h3>";
-    echo "<form method='POST' style='background: #f0f0f0; padding: 20px; border-radius: 5px;'>";
-    echo "<p><strong>⚠️ HATI-HATI: Ini akan memindahkan SEMUA data dari user sumber ke user tujuan!</strong></p>";
-    echo "<label>Dari User ID: <select name='from_user_id'>";
-    foreach ($users as $user) {
-        echo "<option value='{$user['id']}'>{$user['id']} - {$user['username']} ({$user['role']})</option>";
-    }
-    echo "</select></label><br><br>";
-    
-    echo "<label>Ke User ID: <select name='to_user_id'>";
-    foreach ($users as $user) {
-        echo "<option value='{$user['id']}'>{$user['id']} - {$user['username']} ({$user['role']})</option>";
-    }
-    echo "</select></label><br><br>";
-    
-    echo "<input type='submit' name='move_data' value='Pindahkan Data' style='background: #ff6b6b; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;'>";
-    echo "</form>";
-    
-    // Process form submission
-    if (isset($_POST['move_data'])) {
-        $from_user_id = (int)$_POST['from_user_id'];
-        $to_user_id = (int)$_POST['to_user_id'];
         
-        if ($from_user_id != $to_user_id) {
-            echo "<h3>Memindahkan data dari User ID $from_user_id ke User ID $to_user_id...</h3>";
-            
-            foreach ($tables as $table) {
-                try {
-                    $update_stmt = $conn->prepare("UPDATE `$table` SET user_id = ? WHERE user_id = ?");
-                    $update_stmt->execute([$to_user_id, $from_user_id]);
-                    $affected = $update_stmt->rowCount();
-                    echo "<p>✅ Tabel $table: $affected records dipindahkan</p>";
-                } catch (PDOException $e) {
-                    echo "<p style='color: red;'>❌ Error pada tabel $table: " . $e->getMessage() . "</p>";
-                }
-            }
-            
-            echo "<p style='color: green; font-weight: bold;'>✅ Selesai! Refresh halaman untuk melihat hasil terbaru.</p>";
-        } else {
-            echo "<p style='color: red;'>❌ User sumber dan tujuan tidak boleh sama!</p>";
+        // Update records yang user_id-nya NULL menjadi 1
+        $stmt = $conn->prepare("UPDATE $table SET user_id = 1 WHERE user_id IS NULL");
+        $stmt->execute();
+        $affected = $stmt->rowCount();
+        if ($affected > 0) {
+            echo "✓ Updated $affected records di tabel $table yang user_id-nya NULL<br>";
         }
     }
     
-    echo "<hr>";
-    echo "<h3>Testing Isolasi:</h3>";
-    echo "<p>1. Login sebagai user yang berbeda</p>";
-    echo "<p>2. Buat data baru (produk, bahan baku, dll)</p>";
-    echo "<p>3. Logout dan login sebagai user lain</p>";
-    echo "<p>4. Pastikan data tidak terlihat oleh user lain</p>";
+    // 4. Test constraint
+    echo "<p>Testing constraint...</p>";
     
-    echo "<p><a href='/cornerbites-sia/auth/login.php' style='background: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;'>Kembali ke Login</a></p>";
+    // Cek struktur tabel raw_materials
+    $stmt = $conn->query("SHOW CREATE TABLE raw_materials");
+    $result = $stmt->fetch();
+    echo "<details><summary>Struktur tabel raw_materials</summary><pre>" . htmlspecialchars($result['Create Table']) . "</pre></details>";
+    
+    echo "<p><strong>✅ Perbaikan database selesai!</strong></p>";
+    echo "<p>Sekarang setiap user bisa memiliki bahan baku dengan nama yang sama, selama kombinasi (nama + brand + user_id) berbeda.</p>";
     
 } catch (PDOException $e) {
-    echo "<p style='color: red;'>Error: " . $e->getMessage() . "</p>";
+    echo "<p><strong>❌ Error:</strong> " . htmlspecialchars($e->getMessage()) . "</p>";
 }
 ?>
