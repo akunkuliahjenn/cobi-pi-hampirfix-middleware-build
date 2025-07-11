@@ -1,6 +1,8 @@
+
 <?php
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../includes/user_middleware.php';
 
 // Handle AJAX request for ranking pagination with search
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'ranking') {
@@ -12,50 +14,39 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ranking') {
     try {
         $conn = $db;
 
-        // Build search condition - lebih permisif untuk menampilkan produk dengan HPP
-        $where_condition = "WHERE cost_price > 0 AND cost_price IS NOT NULL";
+        // Build search condition dengan user isolation
+        $where_condition = "cost_price > 0 AND cost_price IS NOT NULL";
         $params = [];
 
         if (!empty($search_ranking)) {
             $where_condition .= " AND name LIKE :search";
-            $params[':search'] = '%' . $search_ranking . '%';
+            $params['search'] = '%' . $search_ranking . '%';
         }
 
-        // Count total products for pagination
-        $count_query = "SELECT COUNT(*) as total FROM products " . $where_condition;
-        $stmt = $conn->prepare($count_query);
-        foreach ($params as $key => $value) {
-            $stmt->bindValue($key, $value);
-        }
-        $stmt->execute();
-        $result = $stmt->fetch();
-        $total_products_ranking = $result ? ($result['total'] ?? 0) : 0;
+        // Count total products for pagination dengan user isolation
+        $total_products_ranking = countWithUserId($conn, 'products', $where_condition, $params);
         $total_ranking_pages = ceil($total_products_ranking / $ranking_limit);
 
-        // Get ranking data
-        $ranking_query = "SELECT name, cost_price, 
-                         COALESCE(sale_price, 0) as sale_price, 
-                         (COALESCE(sale_price, 0) - cost_price) as profit, 
-                         CASE 
-                           WHEN COALESCE(sale_price, 0) > 0 THEN ((COALESCE(sale_price, 0) - cost_price) / COALESCE(sale_price, 0) * 100)
-                           ELSE 0 
-                         END as margin,
-                         CASE 
-                           WHEN COALESCE(sale_price, 0) = 0 THEN 'Belum Set Harga'
-                           WHEN COALESCE(sale_price, 0) > cost_price THEN 'Menguntungkan' 
-                           ELSE 'Rugi' 
-                         END as status 
-                         FROM products " . $where_condition . "
-                         ORDER BY cost_price DESC LIMIT :limit OFFSET :offset";
-
-        $stmt = $conn->prepare($ranking_query);
-        foreach ($params as $key => $value) {
-            $stmt->bindValue($key, $value);
-        }
-        $stmt->bindValue(':limit', $ranking_limit, PDO::PARAM_INT);
-        $stmt->bindValue(':offset', $ranking_offset, PDO::PARAM_INT);
-        $stmt->execute();
-        $profitabilityRanking = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        // Get ranking data dengan user isolation
+        $ranking_stmt = selectWithUserId($conn, 'products', 
+            'name, cost_price, 
+             COALESCE(sale_price, 0) as sale_price, 
+             (COALESCE(sale_price, 0) - cost_price) as profit, 
+             CASE 
+               WHEN COALESCE(sale_price, 0) > 0 THEN ((COALESCE(sale_price, 0) - cost_price) / COALESCE(sale_price, 0) * 100)
+               ELSE 0 
+             END as margin,
+             CASE 
+               WHEN COALESCE(sale_price, 0) = 0 THEN \'Belum Set Harga\'
+               WHEN COALESCE(sale_price, 0) > cost_price THEN \'Menguntungkan\' 
+               ELSE \'Rugi\' 
+             END as status', 
+            $where_condition, 
+            $params, 
+            'cost_price DESC', 
+            "$ranking_offset, $ranking_limit"
+        );
+        $profitabilityRanking = $ranking_stmt->fetchAll(PDO::FETCH_ASSOC);
 
         ob_start();
         ?>
@@ -244,38 +235,34 @@ $total_ranking_pages = 0;
 try {
     $conn = $db;
 
-    // Total Products
-    $stmt = $conn->query("SELECT COUNT(*) as total FROM products");
-    $result = $stmt->fetch();
-    $totalProducts = $result ? ($result['total'] ?? 0) : 0;
+    // Total Products dengan user isolation
+    $totalProducts = countWithUserId($conn, 'products');
 
-    // Total Raw Materials (Bahan Baku + Kemasan)
-    $stmt = $conn->query("SELECT COUNT(*) as total FROM raw_materials");
-    $result = $stmt->fetch();
-    $totalRawMaterials = $result ? ($result['total'] ?? 0) : 0;
+    // Total Raw Materials (Bahan Baku + Kemasan) dengan user isolation
+    $totalRawMaterials = countWithUserId($conn, 'raw_materials');
 
-    // Total Bahan Baku only
-    $stmt = $conn->query("SELECT COUNT(*) as total FROM raw_materials WHERE type = 'bahan'");
-    $result = $stmt->fetch();
-    $totalBahanBaku = $result ? ($result['total'] ?? 0) : 0;
+    // Total Bahan Baku only dengan user isolation
+    $totalBahanBaku = countWithUserId($conn, 'raw_materials', 'type = :type', ['type' => 'bahan']);
 
-    // Total Kemasan only  
-    $stmt = $conn->query("SELECT COUNT(*) as total FROM raw_materials WHERE type = 'kemasan'");
-    $result = $stmt->fetch();
-    $totalKemasan = $result ? ($result['total'] ?? 0) : 0;
+    // Total Kemasan only dengan user isolation
+    $totalKemasan = countWithUserId($conn, 'raw_materials', 'type = :type', ['type' => 'kemasan']);
 
-    // Total Recipes Active (products that have recipes)
-    $stmt = $conn->query("SELECT COUNT(DISTINCT product_id) as total FROM product_recipes");
+    // Total Recipes Active (products that have recipes) dengan user isolation
+    $stmt = $conn->prepare("SELECT COUNT(DISTINCT pr.product_id) as total FROM product_recipes pr 
+                           JOIN products p ON pr.product_id = p.id 
+                           WHERE p.user_id = :user_id");
+    $stmt->execute(['user_id' => $_SESSION['user_id']]);
     $result = $stmt->fetch();
     $totalRecipes = $result ? ($result['total'] ?? 0) : 0;
 
-    // Total Labor Positions and Cost (hanya yang aktif)
+    // Total Labor Positions and Cost (hanya yang aktif) dengan user isolation
     try {
         $stmt = $conn->query("SHOW TABLES LIKE 'labor_costs'");
         if ($stmt->rowCount() > 0) {
-            $stmt = $conn->query("SELECT COUNT(*) as total, COALESCE(SUM(hourly_rate), 0) as total_cost FROM labor_costs WHERE is_active = 1");
+            $totalLaborPositions = countWithUserId($conn, 'labor_costs', 'is_active = 1');
+            
+            $stmt = selectWithUserId($conn, 'labor_costs', 'COALESCE(SUM(hourly_rate), 0) as total_cost', 'is_active = 1');
             $result = $stmt->fetch();
-            $totalLaborPositions = $result ? ($result['total'] ?? 0) : 0;
             $totalLaborCost = $result ? ($result['total_cost'] ?? 0) : 0;
         } else {
             $totalLaborPositions = 0;
@@ -287,13 +274,14 @@ try {
         $totalLaborCost = 0;
     }
 
-    // Total Overhead Items and Cost (hanya yang aktif)
+    // Total Overhead Items and Cost (hanya yang aktif) dengan user isolation
     try {
         $stmt = $conn->query("SHOW TABLES LIKE 'overhead_costs'");
         if ($stmt->rowCount() > 0) {
-            $stmt = $conn->query("SELECT COUNT(*) as total, COALESCE(SUM(amount), 0) as total_cost FROM overhead_costs WHERE is_active = 1");
+            $totalOverheadItems = countWithUserId($conn, 'overhead_costs', 'is_active = 1');
+            
+            $stmt = selectWithUserId($conn, 'overhead_costs', 'COALESCE(SUM(amount), 0) as total_cost', 'is_active = 1');
             $result = $stmt->fetch();
-            $totalOverheadItems = $result ? ($result['total'] ?? 0) : 0;
             $totalOverheadCost = $result ? ($result['total_cost'] ?? 0) : 0;
         } else {
             $totalOverheadItems = 0;
@@ -305,51 +293,48 @@ try {
         $totalOverheadCost = 0;
     }
 
-    // Calculate Average HPP (only products with calculated HPP)
-    $stmt = $conn->query("SELECT AVG(cost_price) as avg_hpp FROM products WHERE cost_price > 0 AND cost_price IS NOT NULL");
+    // Calculate Average HPP (only products with calculated HPP) dengan user isolation
+    $stmt = selectWithUserId($conn, 'products', 'AVG(cost_price) as avg_hpp', 'cost_price > 0 AND cost_price IS NOT NULL');
     $result = $stmt->fetch();
     $avgHPP = $result ? ($result['avg_hpp'] ?? 0) : 0;
 
-    // Calculate Average Margin (only products with both cost and sale price)
-    $stmt = $conn->query("SELECT AVG(((sale_price - cost_price) / sale_price) * 100) as avg_margin FROM products WHERE sale_price > 0 AND cost_price > 0 AND sale_price IS NOT NULL AND cost_price IS NOT NULL");
+    // Calculate Average Margin (only products with both cost and sale price) dengan user isolation
+    $stmt = selectWithUserId($conn, 'products', 'AVG(((sale_price - cost_price) / sale_price) * 100) as avg_margin', 'sale_price > 0 AND cost_price > 0 AND sale_price IS NOT NULL AND cost_price IS NOT NULL');
     $result = $stmt->fetch();
     $avgMargin = $result ? ($result['avg_margin'] ?? 0) : 0;
 
-    // Count Profitable Products (profit > 0)
-    $stmt = $conn->query("SELECT COUNT(*) as total FROM products WHERE sale_price > cost_price AND sale_price > 0 AND cost_price > 0 AND sale_price IS NOT NULL AND cost_price IS NOT NULL");
-    $result = $stmt->fetch();
-    $profitableProducts = $result ? ($result['total'] ?? 0) : 0;
+    // Count Profitable Products (profit > 0) dengan user isolation
+    $profitableProducts = countWithUserId($conn, 'products', 'sale_price > cost_price AND sale_price > 0 AND cost_price > 0 AND sale_price IS NOT NULL AND cost_price IS NOT NULL');
 
     // Pagination for profitability ranking
     $ranking_page = isset($_GET['ranking_page']) ? max((int)$_GET['ranking_page'], 1) : 1;
     $ranking_limit = 10;
     $ranking_offset = ($ranking_page - 1) * $ranking_limit;
 
-    // Count total products with HPP for pagination  
-    $stmt = $conn->query("SELECT COUNT(*) as total FROM products WHERE cost_price > 0 AND cost_price IS NOT NULL");
-    $result = $stmt->fetch();
-    $total_products_ranking = $result ? ($result['total'] ?? 0) : 0;
+    // Count total products with HPP for pagination dengan user isolation
+    $total_products_ranking = countWithUserId($conn, 'products', 'cost_price > 0 AND cost_price IS NOT NULL');
     $total_ranking_pages = ceil($total_products_ranking / $ranking_limit);
 
-    // Profitability Ranking with pagination (products with calculated HPP)
+    // Profitability Ranking with pagination (products with calculated HPP) dengan user isolation
     if ($total_products_ranking > 0) {
-        $stmt = $conn->prepare("SELECT name, cost_price, 
-                              COALESCE(sale_price, 0) as sale_price, 
-                              (COALESCE(sale_price, 0) - cost_price) as profit, 
-                              CASE 
-                                WHEN COALESCE(sale_price, 0) > 0 THEN ((COALESCE(sale_price, 0) - cost_price) / COALESCE(sale_price, 0) * 100)
-                                ELSE 0 
-                              END as margin,
-                              CASE 
-                                WHEN COALESCE(sale_price, 0) = 0 THEN 'Belum Set Harga'
-                                WHEN COALESCE(sale_price, 0) > cost_price THEN 'Menguntungkan' 
-                                ELSE 'Rugi' 
-                              END as status 
-                              FROM products WHERE cost_price > 0 AND cost_price IS NOT NULL
-                              ORDER BY cost_price DESC LIMIT :limit OFFSET :offset");
-        $stmt->bindValue(':limit', $ranking_limit, PDO::PARAM_INT);
-        $stmt->bindValue(':offset', $ranking_offset, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt = selectWithUserId($conn, 'products', 
+            'name, cost_price, 
+             COALESCE(sale_price, 0) as sale_price, 
+             (COALESCE(sale_price, 0) - cost_price) as profit, 
+             CASE 
+               WHEN COALESCE(sale_price, 0) > 0 THEN ((COALESCE(sale_price, 0) - cost_price) / COALESCE(sale_price, 0) * 100)
+               ELSE 0 
+             END as margin,
+             CASE 
+               WHEN COALESCE(sale_price, 0) = 0 THEN \'Belum Set Harga\'
+               WHEN COALESCE(sale_price, 0) > cost_price THEN \'Menguntungkan\' 
+               ELSE \'Rugi\' 
+             END as status', 
+            'cost_price > 0 AND cost_price IS NOT NULL', 
+            [], 
+            'cost_price DESC', 
+            "$ranking_offset, $ranking_limit"
+        );
         $profitabilityRanking = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 

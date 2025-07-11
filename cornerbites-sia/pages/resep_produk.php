@@ -3,6 +3,7 @@
 // Halaman untuk mengelola resep produk (komposisi bahan baku/kemasan untuk setiap produk jadi) dengan kalkulasi HPP
 
 require_once __DIR__ . '/../includes/auth_check.php';
+require_once __DIR__ . '/../includes/user_middleware.php';
 require_once __DIR__ . '/../config/db.php';
 
 $message = '';
@@ -38,33 +39,26 @@ try {
     // Test database connection
     $conn->query("SELECT 1");
 
-    // Ambil daftar produk untuk dropdown dengan error handling
-    $stmtProducts = $conn->prepare("SELECT id, name, COALESCE(cost_price, 0) as cost_price, COALESCE(sale_price, 0) as sale_price, COALESCE(production_yield, 1) as production_yield, COALESCE(production_time_hours, 1) as production_time_hours FROM products ORDER BY name ASC");
-    $stmtProducts->execute();
-    $products = $stmtProducts->fetchAll(PDO::FETCH_ASSOC);
+    // Ambil daftar produk untuk dropdown dengan user isolation
+    $productsStmt = selectWithUserId($conn, 'products', 'id, name, COALESCE(cost_price, 0) as cost_price, COALESCE(sale_price, 0) as sale_price, COALESCE(production_yield, 1) as production_yield, COALESCE(production_time_hours, 1) as production_time_hours', '1=1', [], 'name ASC');
+    $products = $productsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Ambil semua bahan baku dan kemasan - TANPA kolom current_stock
-    $stmtRawMaterials = $conn->prepare("
-        SELECT rm.id, rm.name, rm.unit, rm.type, COALESCE(rm.brand, '') as brand
-        FROM raw_materials rm
-        ORDER BY rm.name ASC
-    ");
-    $stmtRawMaterials->execute();
-    $rawMaterialsAndPackaging = $stmtRawMaterials->fetchAll(PDO::FETCH_ASSOC);
+    // Ambil semua bahan baku dan kemasan dengan user isolation
+    $rawMaterialsStmt = selectWithUserId($conn, 'raw_materials', 'id, name, unit, type, COALESCE(brand, \'\') as brand', '1=1', [], 'name ASC');
+    $rawMaterialsAndPackaging = $rawMaterialsStmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Jika ada produk yang dipilih
     if ($selectedProductId) {
-        // Ambil detail produk yang dipilih
-        $stmtSelectedProduct = $conn->prepare("SELECT id, name, cost_price, sale_price, production_yield, production_time_hours FROM products WHERE id = ?");
-        $stmtSelectedProduct->execute([$selectedProductId]);
-        $selectedProduct = $stmtSelectedProduct->fetch(PDO::FETCH_ASSOC);
+        // Ambil detail produk yang dipilih dengan user isolation
+        $selectedProductStmt = selectWithUserId($conn, 'products', 'id, name, cost_price, sale_price, production_yield, production_time_hours', 'id = :product_id', ['product_id' => $selectedProductId]);
+        $selectedProduct = $selectedProductStmt->fetch(PDO::FETCH_ASSOC);
 
-        // Hitung total baris untuk resep dengan filter pencarian
+        // Hitung total baris untuk resep dengan filter pencarian dan user isolation
         $queryTotalRecipe = "
             SELECT COUNT(*) 
             FROM product_recipes pr
             JOIN raw_materials rm ON pr.raw_material_id = rm.id
-            WHERE pr.product_id = :product_id
+            WHERE pr.product_id = :product_id AND pr.user_id = :user_id AND rm.user_id = :user_id
         ";
         if (!empty($searchQueryRecipe)) {
             $queryTotalRecipe .= " AND rm.name LIKE :search_recipe_term";
@@ -72,6 +66,7 @@ try {
 
         $stmtTotalRecipe = $conn->prepare($queryTotalRecipe);
         $stmtTotalRecipe->bindValue(':product_id', $selectedProductId, PDO::PARAM_INT);
+        $stmtTotalRecipe->bindValue(':user_id', $_SESSION['user_id'], PDO::PARAM_INT);
         if (!empty($searchQueryRecipe)) {
             $stmtTotalRecipe->bindValue(':search_recipe_term', '%' . $searchQueryRecipe . '%', PDO::PARAM_STR);
         }
@@ -85,7 +80,7 @@ try {
             $recipesOffset = ($recipesPage - 1) * $recipesLimit;
         }
 
-        // Query untuk mengambil resep dengan LIMIT, OFFSET, dan filter pencarian - TANPA kolom current_stock
+        // Query untuk mengambil resep dengan LIMIT, OFFSET, filter pencarian dan user isolation
         $queryRecipes = "
             SELECT pr.id, pr.product_id, pr.raw_material_id, pr.quantity_used, pr.unit_measurement,
                    rm.name AS raw_material_name, rm.unit AS raw_material_stock_unit, 
@@ -94,7 +89,7 @@ try {
                    rm.type AS raw_material_type, COALESCE(rm.brand, '') as raw_material_brand
             FROM product_recipes pr
             JOIN raw_materials rm ON pr.raw_material_id = rm.id
-            WHERE pr.product_id = :product_id
+            WHERE pr.product_id = :product_id AND pr.user_id = :user_id AND rm.user_id = :user_id
         ";
         if (!empty($searchQueryRecipe)) {
             $queryRecipes .= " AND rm.name LIKE :search_recipe_term";
@@ -103,6 +98,7 @@ try {
 
         $stmtRecipes = $conn->prepare($queryRecipes);
         $stmtRecipes->bindValue(':product_id', $selectedProductId, PDO::PARAM_INT);
+        $stmtRecipes->bindValue(':user_id', $_SESSION['user_id'], PDO::PARAM_INT);
         if (!empty($searchQueryRecipe)) {
             $stmtRecipes->bindValue(':search_recipe_term', '%' . $searchQueryRecipe . '%', PDO::PARAM_STR);
         }
@@ -116,7 +112,7 @@ try {
             $totalCostPerBatch = 0;
             $recipeDetails = [];
 
-            // 1. BIAYA BAHAN BAKU - Ambil semua item resep untuk perhitungan HPP
+            // 1. BIAYA BAHAN BAKU - Ambil semua item resep untuk perhitungan HPP dengan user isolation
             $stmtAllRecipes = $conn->prepare("
                 SELECT pr.id, pr.raw_material_id, pr.quantity_used, pr.unit_measurement,
                        rm.name AS raw_material_name, 
@@ -125,10 +121,10 @@ try {
                        rm.unit AS raw_material_stock_unit, rm.type
                 FROM product_recipes pr
                 JOIN raw_materials rm ON pr.raw_material_id = rm.id
-                WHERE pr.product_id = ?
+                WHERE pr.product_id = ? AND pr.user_id = ? AND rm.user_id = ?
                 ORDER BY rm.name ASC
             ");
-            $stmtAllRecipes->execute([$selectedProductId]);
+            $stmtAllRecipes->execute([$selectedProductId, $_SESSION['user_id'], $_SESSION['user_id']]);
             $allRecipeItems = $stmtAllRecipes->fetchAll(PDO::FETCH_ASSOC);
 
             foreach ($allRecipeItems as $item) {
@@ -169,15 +165,15 @@ try {
             $laborDetails = [];
             $estimatedProductionTimeHours = $selectedProduct['production_time_hours'] ?? 1;
 
-            // Ambil tenaga kerja manual yang sudah dipilih untuk produk ini
+            // Ambil tenaga kerja manual yang sudah dipilih untuk produk ini dengan user isolation
             $stmtManualLabor = $conn->prepare("
                 SELECT plm.*, lc.position_name, lc.hourly_rate as default_hourly_rate
                 FROM product_labor_manual plm
                 JOIN labor_costs lc ON plm.labor_id = lc.id
-                WHERE plm.product_id = ? AND lc.is_active = 1
+                WHERE plm.product_id = ? AND plm.user_id = ? AND lc.user_id = ? AND lc.is_active = 1
                 ORDER BY lc.position_name ASC
             ");
-            $stmtManualLabor->execute([$selectedProductId]);
+            $stmtManualLabor->execute([$selectedProductId, $_SESSION['user_id'], $_SESSION['user_id']]);
             $manualLaborCosts = $stmtManualLabor->fetchAll(PDO::FETCH_ASSOC);
 
             foreach ($manualLaborCosts as $labor) {
@@ -199,15 +195,15 @@ try {
             $overheadDetails = [];
             $productionYield = $selectedProduct['production_yield'] ?? 1;
 
-            // Ambil overhead manual yang sudah dipilih untuk produk ini
+            // Ambil overhead manual yang sudah dipilih untuk produk ini dengan user isolation
             $stmtManualOverhead = $conn->prepare("
                 SELECT pom.*, oc.name, oc.description, oc.allocation_method, oc.amount as default_amount
                 FROM product_overhead_manual pom
                 JOIN overhead_costs oc ON pom.overhead_id = oc.id
-                WHERE pom.product_id = ? AND oc.is_active = 1
+                WHERE pom.product_id = ? AND pom.user_id = ? AND oc.user_id = ? AND oc.is_active = 1
                 ORDER BY oc.name ASC
             ");
-            $stmtManualOverhead->execute([$selectedProductId]);
+            $stmtManualOverhead->execute([$selectedProductId, $_SESSION['user_id'], $_SESSION['user_id']]);
             $manualOverheadCosts = $stmtManualOverhead->fetchAll(PDO::FETCH_ASSOC);
 
             foreach ($manualOverheadCosts as $overhead) {
@@ -420,7 +416,8 @@ try {
                                     </div>
                                     
                                     <button type="button" onclick="confirmUpdateProduct()" class="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition duration-200 flex items-center">
-                                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0```text
+0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
                                         </svg>
                                         Update Info Produk
@@ -723,7 +720,7 @@ try {
                                     <div class="flex justify-between items-center mb-4">
                                         <h4 class="font-bold text-gray-800 flex items-center">
                                             <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 0 011 1v5m-4 0h4"></path>
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
                                             </svg>
                                             Detail Biaya Overhead:
                                         </h4>
@@ -924,23 +921,24 @@ try {
                                     <div id="manual-content-overhead" class="space-y-4 flex-1 flex flex-col justify-between">
                                         <div class="flex-1">
                                             <label class="block text-sm font-medium text-gray-700 mb-2">Pilih Overhead yang Akan Ditambahkan</label>
+                                            
                                             <select name="overhead_id" id="manual-overhead-select" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500">
                                                 <option value="">-- Pilih Overhead --</option>
                                                 <?php
                                 try {
-                                    // Ambil overhead yang belum dipilih untuk produk ini
+                                    // Ambil overhead yang belum dipilih untuk produk ini dengan user isolation
                                     $stmtAvailableOverhead = $conn->prepare("
                                         SELECT oc.id, oc.name, oc.description, oc.allocation_method, oc.amount 
                                         FROM overhead_costs oc 
-                                        WHERE oc.is_active = 1 
+                                        WHERE oc.is_active = 1 AND oc.user_id = ?
                                         AND oc.id NOT IN (
                                             SELECT COALESCE(pom.overhead_id, 0)
                                             FROM product_overhead_manual pom 
-                                            WHERE pom.product_id = ?
+                                            WHERE pom.product_id = ? AND pom.user_id = ?
                                         )
                                         ORDER BY oc.name ASC
                                     ");
-                                    $stmtAvailableOverhead->execute([$selectedProductId]);
+                                    $stmtAvailableOverhead->execute([$_SESSION['user_id'], $selectedProductId, $_SESSION['user_id']]);
                                     $availableOverheads = $stmtAvailableOverhead->fetchAll(PDO::FETCH_ASSOC);
 
                                     foreach ($availableOverheads as $overhead):
@@ -981,19 +979,19 @@ try {
                                                 <option value="">-- Pilih Posisi --</option>
                                                 <?php
                                 try {
-                                    // Ambil labor yang belum dipilih untuk produk ini
+                                    // Ambil labor yang belum dipilih untuk produk ini dengan user isolation
                                     $stmtAvailableLabor = $conn->prepare("
                                         SELECT lc.id, lc.position_name, lc.hourly_rate 
                                         FROM labor_costs lc 
-                                        WHERE lc.is_active = 1 
+                                        WHERE lc.is_active = 1 AND lc.user_id = ?
                                         AND lc.id NOT IN (
                                             SELECT COALESCE(plm.labor_id, 0)
                                             FROM product_labor_manual plm 
-                                            WHERE plm.product_id = ?
+                                            WHERE plm.product_id = ? AND plm.user_id = ?
                                         )
                                         ORDER BY lc.position_name ASC
                                     ");
-                                    $stmtAvailableLabor->execute([$selectedProductId]);
+                                    $stmtAvailableLabor->execute([$_SESSION['user_id'], $selectedProductId, $_SESSION['user_id']]);
                                     $availableLabors = $stmtAvailableLabor->fetchAll(PDO::FETCH_ASSOC);
 
                                     foreach ($availableLabors as $labor):

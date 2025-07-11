@@ -1,5 +1,10 @@
 <?php
+// process/simpan_resep_produk.php
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
+
 require_once __DIR__ . '/../includes/auth_check.php';
+require_once __DIR__ . '/../includes/user_middleware.php';
 require_once __DIR__ . '/../config/db.php';
 
 // Function untuk menghitung HPP berdasarkan resep
@@ -8,14 +13,14 @@ function calculateHPPForProduct($conn, $product_id, $production_yield = 1, $prod
     $laborCostPerBatch = 0;
     $overheadCostPerBatch = 0;
 
-    // 1. BIAYA BAHAN BAKU
+    // 1. BIAYA BAHAN BAKU dengan user isolation
     $stmtRecipes = $conn->prepare("
         SELECT pr.quantity_used, rm.purchase_price_per_unit, rm.default_package_quantity, pr.unit_measurement
         FROM product_recipes pr
         JOIN raw_materials rm ON pr.raw_material_id = rm.id
-        WHERE pr.product_id = ?
+        WHERE pr.product_id = ? AND pr.user_id = ? AND rm.user_id = ?
     ");
-    $stmtRecipes->execute([$product_id]);
+    $stmtRecipes->execute([$product_id, $_SESSION['user_id'], $_SESSION['user_id']]);
     $allRecipeItems = $stmtRecipes->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($allRecipeItems as $item) {
@@ -28,14 +33,14 @@ function calculateHPPForProduct($conn, $product_id, $production_yield = 1, $prod
         $totalBahanBaku += $costPerItem;
     }
 
-    // 2. BIAYA TENAGA KERJA MANUAL
+    // 2. BIAYA TENAGA KERJA MANUAL dengan user isolation
     $stmtManualLabor = $conn->prepare("
         SELECT plm.total_cost
         FROM product_labor_manual plm
         JOIN labor_costs lc ON plm.labor_id = lc.id
-        WHERE plm.product_id = ? AND lc.is_active = 1
+        WHERE plm.product_id = ? AND plm.user_id = ? AND lc.user_id = ? AND lc.is_active = 1
     ");
-    $stmtManualLabor->execute([$product_id]);
+    $stmtManualLabor->execute([$product_id, $_SESSION['user_id'], $_SESSION['user_id']]);
     $manualLaborCosts = $stmtManualLabor->fetchAll(PDO::FETCH_ASSOC);
 
     $laborCostPerBatch = 0;
@@ -43,14 +48,14 @@ function calculateHPPForProduct($conn, $product_id, $production_yield = 1, $prod
         $laborCostPerBatch += $labor['total_cost'];
     }
 
-    // 3. BIAYA OVERHEAD MANUAL
+    // 3. BIAYA OVERHEAD MANUAL dengan user isolation
     $stmtManualOverhead = $conn->prepare("
         SELECT pom.final_amount
         FROM product_overhead_manual pom
         JOIN overhead_costs oc ON pom.overhead_id = oc.id
-        WHERE pom.product_id = ? AND oc.is_active = 1
+        WHERE pom.product_id = ? AND pom.user_id = ? AND oc.user_id = ? AND oc.is_active = 1
     ");
-    $stmtManualOverhead->execute([$product_id]);
+    $stmtManualOverhead->execute([$product_id, $_SESSION['user_id'], $_SESSION['user_id']]);
     $manualOverheadCosts = $stmtManualOverhead->fetchAll(PDO::FETCH_ASSOC);
 
     $overheadCostPerBatch = 0;
@@ -122,8 +127,8 @@ try {
                     throw new Exception('Bahan/kemasan ini sudah ada dalam resep. Silakan edit yang sudah ada.');
                 }
 
-                $stmt = $conn->prepare("INSERT INTO product_recipes (product_id, raw_material_id, quantity_used, unit_measurement) VALUES (?, ?, ?, ?)");
-                $stmt->execute([$product_id, $raw_material_id, $quantity_used, $unit_measurement]);
+                $stmt = $conn->prepare("INSERT INTO product_recipes (product_id, raw_material_id, quantity_used, unit_measurement, user_id) VALUES (?, ?, ?, ?, ?)");
+                $stmt->execute([$product_id, $raw_material_id, $quantity_used, $unit_measurement, $_SESSION['user_id']]);
 
                 // Auto-update HPP setelah menambah item
                 $productStmt = $conn->prepare("SELECT production_yield, production_time_hours FROM products WHERE id = ?");
@@ -224,8 +229,8 @@ try {
                         break;
                 }
 
-                $stmt = $conn->prepare("INSERT INTO product_overhead_manual (product_id, overhead_id, custom_amount, final_amount) VALUES (?, ?, ?, ?)");
-                $stmt->execute([$product_id, $overhead_id, $overhead['amount'], $finalAmount]);
+                $stmt = $conn->prepare("INSERT INTO product_overhead_manual (product_id, overhead_id, custom_amount, final_amount, user_id) VALUES (?, ?, ?, ?, ?)");
+                $stmt->execute([$product_id, $overhead_id, $overhead['amount'], $finalAmount, $_SESSION['user_id']]);
 
                 // Auto-update HPP setelah edit item
                 $productStmt = $conn->prepare("SELECT production_yield, production_time_hours FROM products WHERE id = ?");
@@ -262,8 +267,8 @@ try {
                 $productionTimeHours = $product['production_time_hours'] ?? 1;
                 $totalCost = $labor['hourly_rate'] * $productionTimeHours;
 
-                $stmt = $conn->prepare("INSERT INTO product_labor_manual (product_id, labor_id, custom_hourly_rate, custom_hours, total_cost) VALUES (?, ?, ?, ?, ?)");
-                $stmt->execute([$product_id, $labor_id, $labor['hourly_rate'], $productionTimeHours, $totalCost]);
+                $stmt = $conn->prepare("INSERT INTO product_labor_manual (product_id, labor_id, custom_hourly_rate, custom_hours, total_cost, user_id) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmt->execute([$product_id, $labor_id, $labor['hourly_rate'], $productionTimeHours, $totalCost, $_SESSION['user_id']]);
 
                 // Auto-update HPP setelah edit item
                 $productStmt = $conn->prepare("SELECT production_yield, production_time_hours FROM products WHERE id = ?");

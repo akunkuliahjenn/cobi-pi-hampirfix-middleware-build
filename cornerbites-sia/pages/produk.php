@@ -1,9 +1,9 @@
+
 <?php
 // pages/produk.php
-// Halaman untuk manajemen data produk (daftar, tambah, edit).
-
 require_once __DIR__ . '/../includes/auth_check.php';
-require_once __DIR__ . '/../config/db.php'; // Sertakan file koneksi database
+require_once __DIR__ . '/../includes/user_middleware.php';
+require_once __DIR__ . '/../config/db.php';
 
 $products = [];
 $search = $_GET['search'] ?? '';
@@ -23,7 +23,7 @@ try {
     $offset = ($page - 1) * $limit;
 
     // Build WHERE clause for search
-    $whereClause = "WHERE 1=1";
+    $whereClause = "1=1";
     $params = [];
 
     // Search filter
@@ -32,26 +32,16 @@ try {
         $params[':search'] = '%' . $search . '%';
     }
 
-    // Hitung total produk dengan filter
-    $countQuery = "SELECT COUNT(*) FROM products " . $whereClause;
-    $countStmt = $conn->prepare($countQuery);
-    foreach ($params as $key => $value) {
-        $countStmt->bindValue($key, $value);
-    }
-    $countStmt->execute();
-    $totalProducts = $countStmt->fetchColumn();
+    // Hitung total produk dengan filter menggunakan user_middleware
+    $totalProducts = countWithUserId($conn, 'products', $whereClause, $params);
     $totalPages = ceil($totalProducts / $limit);
 
-    // Mengambil semua kolom yang relevan dari tabel products dengan pagination dan filter
-    $query = "SELECT id, name, unit, sale_price FROM products " . $whereClause . " ORDER BY name ASC LIMIT :limit OFFSET :offset";
-    $stmt = $conn->prepare($query);
-    foreach ($params as $key => $value) {
-        $stmt->bindValue($key, $value);
-    }
-    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-    $stmt->execute();
+    // Mengambil produk dengan pagination dan filter menggunakan user_middleware
+    $orderBy = "name ASC";
+    $limitClause = "$limit OFFSET $offset";
+    $stmt = selectWithUserId($conn, 'products', 'id, name, unit, sale_price', $whereClause, $params, $orderBy, $limitClause);
     $products = $stmt->fetchAll();
+
 } catch (PDOException $e) {
     error_log("Error di halaman Produk: " . $e->getMessage());
 }
@@ -269,15 +259,15 @@ if (isset($_SESSION['product_message'])) {
                             <option value="pcs">pcs (pieces)</option>
                             <option value="porsi">porsi</option>
                             <option value="bungkus">bungkus</option>
-                            <option value="cup">cup</cup>
+                            <option value="cup">cup</option>
                             <option value="botol">botol</option>
-                            <option value="gelas">gelas</gelas>
-                            <option value="slice">slice</slice>
-                            <option value="pack">pack</pack>
-                            <option value="box">box</box>
+                            <option value="gelas">gelas</option>
+                            <option value="slice">slice</option>
+                            <option value="pack">pack</option>
+                            <option value="box">box</option>
                             <option value="kg">kg (kilogram)</option>
-                            <option value="gram">gram</gram>
-                            <option value="liter">liter</liter>
+                            <option value="gram">gram</option>
+                            <option value="liter">liter</option>
                             <option value="ml">ml (mililiter)</option>
                             <option value="custom">Lainnya (ketik sendiri)</option>
                         </select>
@@ -363,7 +353,7 @@ if (isset($_SESSION['product_message'])) {
                             </select>
                         </div>
 
-                    <!-- Grid filler untuk menjaga layout tetap rapi -->
+                        <!-- Grid filler untuk menjaga layout tetap rapi -->
                         <div></div>
                     </div>
                 </div>
@@ -493,7 +483,7 @@ if (isset($_SESSION['product_message'])) {
                                             <span class="sr-only">Next</span>
                                             <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
                                                 <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
-                                        </svg>
+                                            </svg>
                                         </a>
                                     <?php endif; ?>
                                 </nav>
