@@ -1,4 +1,3 @@
-
 <?php
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../config/db.php';
@@ -20,7 +19,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $stmt = $db->prepare("UPDATE users SET password = ?, must_change_password = 1 WHERE id = ?");
             
             if ($stmt->execute([$hashed_password, $user_id])) {
-                $_SESSION['reset_message'] = ['text' => 'Password berhasil direset. User wajib ganti password saat login.', 'type' => 'success'];
+                // Log reset password activity
+                require_once __DIR__ . '/../includes/activity_logger.php';
+                logActivity($_SESSION['user_id'], $_SESSION['username'], 'reset_password', 'Admin mereset password untuk User ' . $user_info['username'], $conn);
+
+                // Password berhasil direset
+                $_SESSION['reset_message'] = ['text' => 'Password berhasil direset untuk user: ' . $user_info['username'], 'type' => 'success'];
             }
         } catch (PDOException $e) {
             $_SESSION['reset_message'] = ['text' => 'Error: ' . $e->getMessage(), 'type' => 'error'];

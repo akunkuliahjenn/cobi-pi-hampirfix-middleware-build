@@ -53,7 +53,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         // Masukkan data user baru ke database dengan role 'user'
         $stmt = $conn->prepare("INSERT INTO users (username, password, role) VALUES (?, ?, ?)");
         if ($stmt->execute([$username, $hashed_password, $role])) {
-            $_SESSION['success_message_register'] = 'Registrasi berhasil! Silakan login.';
+            // Log registration activity
+            require_once __DIR__ . '/../includes/activity_logger.php';
+            logActivity($user_id, $username, 'register', 'User ' . $username . ' baru saja mendaftar', $conn);
+
+            // Registrasi berhasil
+            $_SESSION['success_message_register'] = 'Registrasi berhasil! Silakan login dengan akun Anda.';
             header("Location: /cornerbites-sia/auth/login.php");
             exit();
         } else {

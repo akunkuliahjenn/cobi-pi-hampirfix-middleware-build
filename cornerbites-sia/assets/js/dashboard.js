@@ -1,14 +1,16 @@
-
-// Dashboard JavaScript untuk HPP Calculator
+// User Dashboard JavaScript untuk HPP Calculator
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize dashboard features
+    // Initialize user dashboard features
+    initUserDashboard();
+    console.log('User HPP Dashboard loaded successfully');
+});
+
+function initUserDashboard() {
     initQuickActions();
     initAlerts();
     initRankingControls();
     initCharts();
-
-    console.log('HPP Dashboard loaded successfully');
-});
+}
 
 function initQuickActions() {
     // Add hover effects and analytics tracking for quick action buttons

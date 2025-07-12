@@ -62,6 +62,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $_SESSION['login_time'] = time();
             $_SESSION['last_activity'] = time();
 
+            // Log activity
+            require_once __DIR__ . '/../includes/activity_logger.php';
+            logActivity($user['id'], $user['username'], 'login', 'User ' . $user['username'] . ' baru saja login', $conn);
+
             // Log successful login (optional)
             error_log("Successful login: User ID {$user['id']} ({$user['username']}) from IP {$_SERVER['REMOTE_ADDR']}");
 

@@ -1,13 +1,13 @@
 
 <?php
 // admin/users.php
-// Halaman untuk admin mengelola data pengguna (view, edit, hapus).
+// Kelola pengguna - hanya admin yang bisa mengakses
 
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../config/db.php';
 
-// Pastikan hanya admin yang bisa mengakses halaman ini
-if ($_SESSION['user_role'] !== 'admin') {
+// Pastikan hanya admin yang bisa mengakses
+if (!isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'admin') {
     header("Location: /cornerbites-sia/pages/dashboard.php");
     exit();
 }
@@ -18,70 +18,99 @@ $totalUsers = 0;
 $totalAdmins = 0;
 $totalRegularUsers = 0;
 
-// Pagination
-$page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
-$limit = isset($_GET['limit']) ? max(5, min(50, intval($_GET['limit']))) : 10; // Default 10, min 5, max 50
+// Pengaturan pagination
+$page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
+$limit = isset($_GET['limit']) ? max(5, min(100, (int)$_GET['limit'])) : 10;
 $offset = ($page - 1) * $limit;
-$totalPages = 0;
 
-// Search dan Filter
+// Filter pencarian
 $search = isset($_GET['search']) ? trim($_GET['search']) : '';
 $roleFilter = isset($_GET['role']) ? trim($_GET['role']) : '';
 
 try {
     $conn = $db;
+    
+    // Debug: Cek koneksi database
+    if (!$conn) {
+        throw new Exception("Koneksi database gagal");
+    }
+    
+    // Debug: Test query sederhana
+    $testQuery = $conn->query("SELECT 1");
+    if (!$testQuery) {
+        throw new Exception("Query test gagal");
+    }
+    
+    error_log("DEBUG: Koneksi database berhasil di users.php");
 
-    // Build WHERE clause untuk search dan filter
-    $whereConditions = [];
+    // Base query untuk menghitung total
+    $baseQuery = "SELECT COUNT(*) FROM users WHERE 1=1";
     $params = [];
 
+    // Tambahkan filter pencarian
     if (!empty($search)) {
-        $whereConditions[] = "username LIKE ?";
-        $params[] = "%$search%";
+        $baseQuery .= " AND username LIKE :search";
+        $params['search'] = '%' . $search . '%';
     }
 
+    // Tambahkan filter role
     if (!empty($roleFilter)) {
-        $whereConditions[] = "role = ?";
-        $params[] = $roleFilter;
+        $baseQuery .= " AND role = :role";
+        $params['role'] = $roleFilter;
     }
 
-    $whereClause = !empty($whereConditions) ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
+    // Hitung total users dengan filter
+    $stmt = $conn->prepare($baseQuery);
+    $stmt->execute($params);
+    $totalFilteredUsers = $stmt->fetchColumn();
 
-    // Hitung total records
-    $stmtCount = $conn->prepare("SELECT COUNT(*) FROM users $whereClause");
-    if (!empty($params)) {
-        $stmtCount->execute($params);
-    } else {
-        $stmtCount->execute();
+    // Query untuk mendapatkan data users dengan pagination
+    $userQuery = "SELECT id, username, role, created_at, last_login_at FROM users WHERE 1=1";
+    
+    if (!empty($search)) {
+        $userQuery .= " AND username LIKE :search";
     }
-    $totalRecords = $stmtCount->fetchColumn();
-    $totalPages = ceil($totalRecords / $limit);
-
-    // Ambil data users dengan pagination
-    $sql = "SELECT id, username, role, created_at FROM users $whereClause ORDER BY created_at DESC LIMIT ? OFFSET ?";
-    $stmt = $conn->prepare($sql);
-    $paramsWithLimit = array_merge($params, [$limit, $offset]);
-    $stmt->execute($paramsWithLimit);
+    
+    if (!empty($roleFilter)) {
+        $userQuery .= " AND role = :role";
+    }
+    
+    $userQuery .= " ORDER BY created_at DESC LIMIT :limit OFFSET :offset";
+    
+    $stmt = $conn->prepare($userQuery);
+    
+    // Bind parameters
+    if (!empty($search)) {
+        $stmt->bindValue(':search', '%' . $search . '%', PDO::PARAM_STR);
+    }
+    
+    if (!empty($roleFilter)) {
+        $stmt->bindValue(':role', $roleFilter, PDO::PARAM_STR);
+    }
+    
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    
+    $stmt->execute();
     $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Statistik untuk cards
-    $stmtStats = $conn->query("SELECT role, COUNT(*) as count FROM users GROUP BY role");
-    $roleStats = $stmtStats->fetchAll(PDO::FETCH_KEY_PAIR);
+    // Statistik umum
+    $stmtTotalUsers = $conn->query("SELECT COUNT(*) FROM users");
+    $totalUsers = $stmtTotalUsers->fetchColumn() ?: 0;
     
-    $totalUsers = array_sum($roleStats);
-    $totalAdmins = $roleStats['admin'] ?? 0;
-    $totalRegularUsers = $roleStats['user'] ?? 0;
-
-    // Debug: Log query info
-    error_log("Users query: Total records = $totalRecords, Users fetched = " . count($users));
+    $stmtTotalAdmins = $conn->query("SELECT COUNT(*) FROM users WHERE role = 'admin'");
+    $totalAdmins = $stmtTotalAdmins->fetchColumn() ?: 0;
+    
+    $stmtTotalRegularUsers = $conn->query("SELECT COUNT(*) FROM users WHERE role = 'user'");
+    $totalRegularUsers = $stmtTotalRegularUsers->fetchColumn() ?: 0;
 
 } catch (PDOException $e) {
-    error_log("Error di Admin Users: " . $e->getMessage());
-    $totalUsers = 0;
-    $totalAdmins = 0;
-    $totalRegularUsers = 0;
+    error_log("Error di Users Admin: " . $e->getMessage());
     $users = [];
 }
+
+// Hitung total halaman
+$totalPages = ceil($totalFilteredUsers / $limit);
 
 // Pesan sukses atau error
 $message = '';
@@ -100,16 +129,16 @@ if (isset($_SESSION['user_management_message'])) {
     <div class="flex-1 flex flex-col overflow-hidden">
         <header class="bg-white shadow-sm border-b border-gray-200">
             <div class="px-6 py-4">
-                <h1 class="text-2xl font-bold text-gray-900">Manajemen Pengguna</h1>
-                <p class="text-gray-600 mt-1">Kelola semua akun pengguna sistem</p>
+                <h1 class="text-2xl font-bold text-gray-900">Kelola Pengguna</h1>
+                <p class="text-gray-600 mt-1">Manajemen pengguna sistem Corner Bites SIA</p>
             </div>
         </header>
 
         <main class="flex-1 overflow-x-hidden overflow-y-auto bg-gradient-to-br from-gray-50 to-gray-100 p-6">
             <div class="max-w-7xl mx-auto space-y-6">
-
+                
                 <?php if ($message): ?>
-                    <div class="<?php echo $message_type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'; ?> border rounded-lg p-4 shadow-sm">
+                    <div class="<?php echo $message_type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'; ?> border rounded-lg p-4 shadow-sm alert-auto-hide">
                         <div class="flex items-center">
                             <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                                 <?php if ($message_type === 'success'): ?>
@@ -123,7 +152,7 @@ if (isset($_SESSION['user_management_message'])) {
                     </div>
                 <?php endif; ?>
 
-                <!-- Statistik Cards -->
+                <!-- Statistics Cards -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
                         <div class="flex items-center justify-between">
@@ -156,7 +185,7 @@ if (isset($_SESSION['user_management_message'])) {
                     <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
                         <div class="flex items-center justify-between">
                             <div>
-                                <h3 class="text-lg font-semibold text-gray-700">Pengguna Biasa</h3>
+                                <h3 class="text-lg font-semibold text-gray-700">User Biasa</h3>
                                 <p class="text-3xl font-bold text-green-600 mt-2"><?php echo $totalRegularUsers; ?></p>
                             </div>
                             <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
@@ -168,190 +197,226 @@ if (isset($_SESSION['user_management_message'])) {
                     </div>
                 </div>
 
-                <!-- Search dan Filter -->
-                <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-                    <div class="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
-                        <div class="flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 md:space-x-4">
-                            <div class="relative">
-                                <input type="text" id="searchUser" placeholder="Cari pengguna..." 
-                                       value="<?php echo htmlspecialchars($search); ?>"
-                                       class="w-full md:w-64 pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                                <div class="absolute inset-y-0 left-0 pl-3 flex items-center">
-                                    <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                                    </svg>
-                                </div>
-                            </div>
-                            <select id="filterRole" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <option value="">Semua Role</option>
-                                <option value="admin" <?php echo $roleFilter === 'admin' ? 'selected' : ''; ?>>Admin</option>
-                                <option value="user" <?php echo $roleFilter === 'user' ? 'selected' : ''; ?>>User</option>
-                            </select>
-                        </div>
-                        <div class="flex items-center space-x-3">
-                            <label for="limitSelect" class="text-sm font-medium text-gray-700">Data per halaman:</label>
-                            <select id="limitSelect" class="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
-                                <option value="5" <?php echo $limit == 5 ? 'selected' : ''; ?>>5</option>
-                                <option value="10" <?php echo $limit == 10 ? 'selected' : ''; ?>>10</option>
-                                <option value="20" <?php echo $limit == 20 ? 'selected' : ''; ?>>20</option>
-                                <option value="50" <?php echo $limit == 50 ? 'selected' : ''; ?>>50</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Daftar Semua Pengguna -->
+                <!-- Users Management -->
                 <div class="bg-white rounded-xl shadow-lg border border-gray-100">
-                    <div class="p-6 border-b border-gray-200">
-                        <h3 class="text-xl font-semibold text-gray-800">Daftar Pengguna</h3>
-                        <p class="text-gray-600 text-sm mt-1">Menampilkan <?php echo count($users); ?> dari <?php echo $totalRecords; ?> pengguna</p>
-                    </div>
-
-                    <?php if (empty($users)): ?>
-                        <div class="p-12 text-center">
-                            <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
-                            </svg>
-                            <h3 class="mt-2 text-sm font-medium text-gray-900">Tidak ada pengguna</h3>
-                            <p class="mt-1 text-sm text-gray-500">
-                                <?php echo !empty($search) || !empty($roleFilter) ? 'Tidak ada pengguna yang sesuai dengan kriteria pencarian.' : 'Belum ada pengguna yang terdaftar.'; ?>
-                            </p>
+                    <div class="p-6">
+                        <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+                            <h2 class="text-xl font-bold text-gray-900 mb-4 md:mb-0">Daftar Pengguna</h2>
+                            <div class="flex flex-col md:flex-row space-y-2 md:space-y-0 md:space-x-4">
+                                <div class="relative">
+                                    <input type="text" id="searchUser" placeholder="Cari pengguna..." 
+                                           value="<?php echo htmlspecialchars($search); ?>"
+                                           class="w-full md:w-64 pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center">
+                                        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <select id="filterRole" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="">Semua Role</option>
+                                    <option value="admin" <?php echo $roleFilter === 'admin' ? 'selected' : ''; ?>>Admin</option>
+                                    <option value="user" <?php echo $roleFilter === 'user' ? 'selected' : ''; ?>>User</option>
+                                </select>
+                                <button onclick="showAddUserModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors">
+                                    Tambah Pengguna
+                                </button>
+                            </div>
                         </div>
-                    <?php else: ?>
-                        <div class="overflow-x-auto" id="usersTableContainer">
-                            <table class="w-full" id="usersTable">
-                                <thead class="bg-gray-50">
-                                    <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal Daftar</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">
-                                    <?php foreach ($users as $user): ?>
-                                        <tr class="hover:bg-gray-50 user-row" data-username="<?php echo htmlspecialchars($user['username']); ?>" data-role="<?php echo htmlspecialchars($user['role']); ?>">
-                                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                <?php echo htmlspecialchars($user['id']); ?>
-                                            </td>
-                                            <td class="px-6 py-4 whitespace-nowrap">
-                                                <div class="flex items-center">
-                                                    <div class="w-8 h-8 bg-gradient-to-r from-blue-400 to-purple-500 rounded-full flex items-center justify-center mr-3">
-                                                        <span class="text-white font-semibold text-xs"><?php echo strtoupper(substr($user['username'], 0, 1)); ?></span>
+
+                        <?php if (!empty($users)): ?>
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full table-auto">
+                                    <thead>
+                                        <tr class="bg-gray-50">
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal Daftar</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Login Terakhir</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">
+                                        <?php foreach ($users as $user): ?>
+                                            <tr class="hover:bg-gray-50">
+                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                                    <?php echo htmlspecialchars($user['id']); ?>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <div class="flex items-center">
+                                                        <div class="w-10 h-10 bg-gradient-to-r from-blue-400 to-purple-500 rounded-full flex items-center justify-center mr-3">
+                                                            <span class="text-white font-semibold text-sm">
+                                                                <?php echo strtoupper(substr($user['username'], 0, 1)); ?>
+                                                            </span>
+                                                        </div>
+                                                        <div>
+                                                            <div class="text-sm font-medium text-gray-900">
+                                                                <?php echo htmlspecialchars($user['username']); ?>
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                    <div>
-                                                        <div class="text-sm font-medium text-gray-900"><?php echo htmlspecialchars($user['username']); ?></div>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td class="px-6 py-4 whitespace-nowrap">
-                                                <span class="px-2 py-1 text-xs font-semibold rounded-full <?php echo $user['role'] === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'; ?>">
-                                                    <?php echo ucfirst($user['role']); ?>
-                                                </span>
-                                            </td>
-                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                <?php echo date('d M Y H:i', strtotime($user['created_at'])); ?>
-                                            </td>
-                                            <td class="px-6 py-4 whitespace-nowrap">
-                                                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                                    Aktif
-                                                </span>
-                                            </td>
-                                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                                <div class="flex items-center space-x-2">
-                                                    <button onclick="editUser(<?php echo htmlspecialchars(json_encode($user)); ?>)" class="text-blue-600 hover:text-blue-900 font-medium">
-                                                        Edit
-                                                    </button>
-                                                    <?php if ($user['id'] != $_SESSION['user_id']): ?>
-                                                        <button onclick="resetPassword(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>')" class="text-orange-600 hover:text-orange-900 font-medium">
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <span class="px-2 py-1 text-xs font-semibold rounded-full <?php echo $user['role'] === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'; ?>">
+                                                        <?php echo ucfirst($user['role']); ?>
+                                                    </span>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                    <?php echo date('d M Y', strtotime($user['created_at'])); ?>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                    <?php echo $user['last_login_at'] ? date('d M Y H:i', strtotime($user['last_login_at'])) : 'Belum pernah login'; ?>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                                    <div class="flex space-x-2">
+                                                        <button onclick="editUser(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>', '<?php echo $user['role']; ?>')" 
+                                                                class="text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md transition-colors">
+                                                            Edit
+                                                        </button>
+                                                        <button onclick="showResetPasswordModal(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>')" 
+                                                                class="text-yellow-600 hover:text-yellow-800 bg-yellow-50 hover:bg-yellow-100 px-3 py-1 rounded-md transition-colors">
                                                             Reset Password
                                                         </button>
-                                                        <button onclick="deleteUser(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>')" class="text-red-600 hover:text-red-900 font-medium">
-                                                            Hapus
-                                                        </button>
+                                                        <?php if ($user['id'] != $_SESSION['user_id']): ?>
+                                                            <button onclick="deleteUser(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>')" 
+                                                                    class="text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-3 py-1 rounded-md transition-colors">
+                                                                Hapus
+                                                            </button>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Pagination -->
+                            <?php if ($totalPages > 1): ?>
+                                <div class="bg-white px-6 py-4 border-t border-gray-200">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex-1 flex justify-between sm:hidden">
+                                            <?php if ($page > 1): ?>
+                                                <a href="?page=<?php echo ($page - 1) . ($search ? '&search=' . urlencode($search) : '') . ($roleFilter ? '&role=' . urlencode($roleFilter) : '') . '&limit=' . $limit; ?>" 
+                                                   class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                                                    Previous
+                                                </a>
+                                            <?php endif; ?>
+                                            <?php if ($page < $totalPages): ?>
+                                                <a href="?page=<?php echo ($page + 1) . ($search ? '&search=' . urlencode($search) : '') . ($roleFilter ? '&role=' . urlencode($roleFilter) : '') . '&limit=' . $limit; ?>" 
+                                                   class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                                                    Next
+                                                </a>
+                                            <?php endif; ?>
+                                        </div>
+                                        <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                                            <div>
+                                                <p class="text-sm text-gray-700">
+                                                    Menampilkan <span class="font-medium"><?php echo (($page - 1) * $limit) + 1; ?></span> sampai 
+                                                    <span class="font-medium"><?php echo min($page * $limit, $totalFilteredUsers); ?></span> dari 
+                                                    <span class="font-medium"><?php echo $totalFilteredUsers; ?></span> pengguna
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
+                                                    <?php if ($page > 1): ?>
+                                                        <a href="?page=<?php echo ($page - 1) . ($search ? '&search=' . urlencode($search) : '') . ($roleFilter ? '&role=' . urlencode($roleFilter) : '') . '&limit=' . $limit; ?>" 
+                                                           class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                                                            <span class="sr-only">Previous</span>
+                                                            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                                                                <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+                                                            </svg>
+                                                        </a>
                                                     <?php endif; ?>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
 
-                        <!-- Pagination -->
-                        <?php if ($totalPages > 1): ?>
-                            <div class="px-6 py-3 border-t border-gray-200 bg-gray-50">
-                                <div class="flex items-center justify-between">
-                                    <div class="text-sm text-gray-700">
-                                        Menampilkan <span class="font-medium"><?php echo ($offset + 1); ?></span> sampai 
-                                        <span class="font-medium"><?php echo min($offset + $limit, $totalRecords); ?></span> dari 
-                                        <span class="font-medium"><?php echo $totalRecords; ?></span> hasil
-                                    </div>
-                                    <div class="flex space-x-1">
-                                        <?php if ($page > 1): ?>
-                                            <a href="?page=<?php echo ($page - 1) . ($search ? '&search=' . urlencode($search) : '') . ($roleFilter ? '&role=' . urlencode($roleFilter) : '') . '&limit=' . $limit; ?>" 
-                                               class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-l-md hover:bg-gray-50">
-                                                ‹ Sebelumnya
-                                            </a>
-                                        <?php endif; ?>
+                                                    <?php 
+                                                    $startPage = max(1, $page - 2);
+                                                    $endPage = min($totalPages, $page + 2);
+                                                    for ($i = $startPage; $i <= $endPage; $i++):
+                                                    ?>
+                                                        <a href="?page=<?php echo $i . ($search ? '&search=' . urlencode($search) : '') . ($roleFilter ? '&role=' . urlencode($roleFilter) : '') . '&limit=' . $limit; ?>"
+                                                           class="<?php echo $i == $page ? 'z-10 bg-blue-50 border-blue-500 text-blue-600' : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'; ?> relative inline-flex items-center px-4 py-2 border text-sm font-medium">
+                                                            <?php echo $i; ?>
+                                                        </a>
+                                                    <?php endfor; ?>
 
-                                        <?php for ($i = max(1, $page - 2); $i <= min($totalPages, $page + 2); $i++): ?>
-                                            <a href="?page=<?php echo $i . ($search ? '&search=' . urlencode($search) : '') . ($roleFilter ? '&role=' . urlencode($roleFilter) : '') . '&limit=' . $limit; ?>" 
-                                               class="px-3 py-2 text-sm font-medium <?php echo $i == $page ? 'text-blue-600 bg-blue-50 border-blue-500' : 'text-gray-500 bg-white border-gray-300 hover:bg-gray-50'; ?> border">
-                                                <?php echo $i; ?>
-                                            </a>
-                                        <?php endfor; ?>
-
-                                        <?php if ($page < $totalPages): ?>
-                                            <a href="?page=<?php echo ($page + 1) . ($search ? '&search=' . urlencode($search) : '') . ($roleFilter ? '&role=' . urlencode($roleFilter) : '') . '&limit=' . $limit; ?>" 
-                                               class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-r-md hover:bg-gray-50">
-                                                Selanjutnya ›
-                                            </a>
-                                        <?php endif; ?>
+                                                    <?php if ($page < $totalPages): ?>
+                                                        <a href="?page=<?php echo ($page + 1) . ($search ? '&search=' . urlencode($search) : '') . ($roleFilter ? '&role=' . urlencode($roleFilter) : '') . '&limit=' . $limit; ?>" 
+                                                           class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                                                            <span class="sr-only">Next</span>
+                                                            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                                                                <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                                                            </svg>
+                                                        </a>
+                                                    <?php endif; ?>
+                                                </nav>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <div class="text-center py-12">
+                                <svg class="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                                </svg>
+                                <h3 class="text-lg font-medium text-gray-900 mb-2">Tidak ada pengguna ditemukan</h3>
+                                <p class="text-gray-500 mb-4">
+                                    <?php if (!empty($search) || !empty($roleFilter)): ?>
+                                        Coba ubah filter pencarian atau tambahkan pengguna baru.
+                                    <?php else: ?>
+                                        Mulai dengan menambahkan pengguna baru.
+                                    <?php endif; ?>
+                                </p>
+                                <button onclick="showAddUserModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors">
+                                    Tambah Pengguna
+                                </button>
                             </div>
                         <?php endif; ?>
-                    <?php endif; ?>
+                    </div>
                 </div>
             </div>
         </main>
     </div>
 </div>
 
-<!-- Modal Edit User -->
+<!-- Modal Add/Edit User -->
 <div id="userModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
     <div class="flex items-center justify-center min-h-screen p-4">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-md">
             <div class="p-6">
-                <h3 class="text-lg font-semibold text-gray-900 mb-4" id="modalTitle">Edit Pengguna</h3>
+                <h3 class="text-lg font-semibold text-gray-900 mb-4" id="modalTitle">Tambah Pengguna</h3>
                 <form id="userForm" action="/cornerbites-sia/process/kelola_user.php" method="POST">
                     <input type="hidden" name="user_id" id="user_id_to_edit" value="">
                     <div class="space-y-4">
                         <div>
-                            <label for="username" class="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                            <input type="text" id="username" name="username" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                            <input type="text" name="username" id="username" required 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
                         <div>
-                            <label for="password" class="block text-sm font-medium text-gray-700 mb-1">Password Baru</label>
-                            <input type="password" id="password" name="password" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <p class="text-xs text-gray-500 mt-1" id="passwordHelp">Kosongkan jika tidak ingin mengubah password</p>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                            <input type="password" name="password" id="password" 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1" id="passwordHelp">Minimal 6 karakter. Kosongkan jika tidak ingin mengubah password.</p>
                         </div>
                         <div>
-                            <label for="role" class="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                            <select id="role" name="role" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                            <select name="role" id="role" required 
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <option value="user">User</option>
                                 <option value="admin">Admin</option>
                             </select>
                         </div>
                     </div>
                     <div class="flex justify-end space-x-3 mt-6">
-                        <button type="button" onclick="closeModal()" class="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors">
+                        <button type="button" onclick="hideUserModal()" 
+                                class="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
                             Batal
                         </button>
-                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors" id="submitBtn">
+                        <button type="submit" 
+                                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
                             Simpan
                         </button>
                     </div>
@@ -361,78 +426,40 @@ if (isset($_SESSION['user_management_message'])) {
     </div>
 </div>
 
-<!-- Reset Password Modal -->
-<div id="resetPasswordModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden">
-    <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-        <div class="mt-3 text-center">
-            <h3 class="text-lg leading-6 font-medium text-gray-900">Reset Password</h3>
-            <div class="mt-2 px-7 py-3">
-                <p class="text-sm text-gray-500">Reset password untuk: <span id="resetUsername" class="font-semibold"></span></p>
+<!-- Modal Reset Password -->
+<div id="resetPasswordModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
+    <div class="flex items-center justify-center min-h-screen p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md">
+            <div class="p-6">
+                <h3 class="text-lg font-semibold text-gray-900 mb-4">Reset Password</h3>
+                <p class="text-gray-600 mb-4">Reset password untuk user: <span id="resetUsername" class="font-semibold"></span></p>
+                <form action="/cornerbites-sia/admin/reset_password.php" method="POST">
+                    <input type="hidden" name="user_id" id="resetUserId" value="">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Password Baru</label>
+                            <input type="password" name="new_password" required 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Minimal 6 karakter</p>
+                        </div>
+                    </div>
+                    <div class="flex justify-end space-x-3 mt-6">
+                        <button type="button" onclick="hideResetPasswordModal()" 
+                                class="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
+                            Batal
+                        </button>
+                        <button type="submit" 
+                                class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors">
+                            Reset Password
+                        </button>
+                    </div>
+                </form>
             </div>
-            <form action="/cornerbites-sia/admin/reset_password.php" method="POST">
-                <input type="hidden" id="resetUserId" name="user_id" value="">
-                <div class="mt-4">
-                    <input type="password" name="new_password" placeholder="Password baru (min. 6 karakter)" 
-                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
-                </div>
-                <div class="items-center px-4 py-3">
-                    <button type="submit" class="px-4 py-2 bg-blue-500 text-white text-base font-medium rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300">
-                        Reset Password
-                    </button>
-                    <button type="button" onclick="hideResetPasswordModal()" class="ml-3 px-4 py-2 bg-gray-500 text-white text-base font-medium rounded-md shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-300">
-                        Batal
-                    </button>
-                </div>
-            </form>
         </div>
     </div>
 </div>
 
 <script src="/cornerbites-sia/assets/js/admin.js"></script>
-<script>
-// Search real-time dengan AJAX
-let searchTimeout;
-document.getElementById('searchUser').addEventListener('input', function() {
-    clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(function() {
-        performSearch();
-    }, 300);
-});
+<script src="/cornerbites-sia/assets/js/users.js"></script>
 
-document.getElementById('filterRole').addEventListener('change', function() {
-    performSearch();
-});
-
-document.getElementById('limitSelect').addEventListener('change', function() {
-    performSearch();
-});
-
-function performSearch() {
-    const search = document.getElementById('searchUser').value;
-    const role = document.getElementById('filterRole').value;
-    const limit = document.getElementById('limitSelect').value;
-    
-    // Update URL tanpa reload
-    const url = new URL(window.location);
-    if (search) {
-        url.searchParams.set('search', search);
-    } else {
-        url.searchParams.delete('search');
-    }
-    
-    if (role) {
-        url.searchParams.set('role', role);
-    } else {
-        url.searchParams.delete('role');
-    }
-    
-    url.searchParams.set('limit', limit);
-    url.searchParams.delete('page'); // Reset ke halaman 1
-    window.history.replaceState({}, '', url);
-    
-    // Reload halaman untuk menampilkan hasil pencarian
-    window.location.reload();
-}
-</script>
-</body>
-</html>
+<?php include_once __DIR__ . '/../includes/footer.php'; ?>

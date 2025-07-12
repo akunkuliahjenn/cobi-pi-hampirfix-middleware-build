@@ -60,6 +60,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $stmt = $conn->prepare($query);
             if ($stmt->execute($params)) {
                 $conn->commit();
+                // Log update user activity
+                require_once __DIR__ . '/../includes/activity_logger.php';
+                logActivity($_SESSION['user_id'], $_SESSION['username'], 'update_user', 'Admin mengupdate data user: ' . $username, $conn);
+
                 $_SESSION['user_management_message'] = ['text' => 'Pengguna berhasil diperbarui!', 'type' => 'success'];
             } else {
                 $conn->rollBack();
@@ -92,6 +96,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $stmt = $conn->prepare("INSERT INTO users (username, password, role) VALUES (?, ?, ?)");
             if ($stmt->execute([$username, $hashed_password, $role])) {
                 $conn->commit();
+                // Log create user activity
+                require_once __DIR__ . '/../includes/activity_logger.php';
+                logActivity($_SESSION['user_id'], $_SESSION['username'], 'create_user', 'Admin membuat user baru: ' . $username, $conn);
+
                 $_SESSION['user_management_message'] = ['text' => 'Pengguna baru berhasil ditambahkan!', 'type' => 'success'];
             } else {
                 $conn->rollBack();

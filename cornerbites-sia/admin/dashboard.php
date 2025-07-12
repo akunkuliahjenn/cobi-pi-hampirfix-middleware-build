@@ -1,3 +1,4 @@
+
 <?php
 // admin/dashboard.php
 // Dashboard admin yang fokus pada statistik pengguna dan manajemen sistem
@@ -33,6 +34,94 @@ try {
 
 } catch (PDOException $e) {
     error_log("Error di Admin Dashboard: " . $e->getMessage());
+}
+
+// Log aktivitas terbaru
+$activityLogs = [];
+$userGrowthData = [];
+$roleComposition = [];
+
+try {
+    // Ambil log aktivitas terbaru dari tabel activity_logs jika ada
+    try {
+        $stmt = $conn->query("SELECT 
+            username, 
+            activity_type, 
+            activity_description, 
+            created_at
+            FROM activity_logs 
+            ORDER BY created_at DESC 
+            LIMIT 10");
+        
+        $activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        foreach ($activities as $activity) {
+            $activityLogs[] = [
+                'type' => $activity['activity_type'],
+                'message' => $activity['activity_description'],
+                'time' => $activity['created_at'],
+                'icon' => $activity['activity_type'] === 'login' ? 'login' : 'user-plus'
+            ];
+        }
+    } catch (PDOException $e) {
+        // Jika tabel activity_logs belum ada, gunakan data users sebagai fallback
+        $stmt = $conn->query("SELECT 
+            u.username, 
+            u.role, 
+            u.created_at, 
+            u.last_login_at,
+            CASE 
+                WHEN u.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 'register'
+                WHEN u.last_login_at >= DATE_SUB(NOW(), INTERVAL 1 DAY) THEN 'login'
+                ELSE 'active'
+            END as activity_type
+            FROM users u 
+            ORDER BY COALESCE(u.last_login_at, u.created_at) DESC 
+            LIMIT 10");
+
+        $activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($activities as $activity) {
+            $timeAgo = $activity['created_at'];
+            if ($activity['activity_type'] == 'register') {
+                $activityLogs[] = [
+                    'type' => 'register',
+                    'message' => 'User ' . $activity['username'] . ' baru saja mendaftar',
+                    'time' => $timeAgo,
+                    'icon' => 'user-plus'
+                ];
+            } else if ($activity['activity_type'] == 'login' && $activity['last_login_at']) {
+                $activityLogs[] = [
+                    'type' => 'login',
+                    'message' => 'User ' . $activity['username'] . ' baru saja login',
+                    'time' => $activity['last_login_at'],
+                    'icon' => 'login'
+                ];
+            }
+        }
+    }
+
+    // Data untuk grafik pertumbuhan pengguna (7 hari terakhir)
+    for ($i = 6; $i >= 0; $i--) {
+        $date = date('Y-m-d', strtotime("-$i days"));
+        $stmt = $conn->prepare("SELECT COUNT(*) as count FROM users WHERE DATE(created_at) = ?");
+        $stmt->execute([$date]);
+        $count = $stmt->fetchColumn();
+
+        $userGrowthData[] = [
+            'date' => date('M j', strtotime($date)),
+            'count' => $count
+        ];
+    }
+
+    // Data untuk grafik komposisi role
+    $roleComposition = [
+        'admin' => $totalAdmins,
+        'user' => $totalRegularUsers
+    ];
+
+} catch (PDOException $e) {
+    error_log("Error getting activity logs: " . $e->getMessage());
 }
 
 // Pesan sukses atau error
@@ -126,81 +215,47 @@ if (isset($_SESSION['admin_message'])) {
                     </div>
                 </div>
 
-                <!-- Sistem Status -->
+                <!-- Log Aktivitas Terbaru -->
                 <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Status Sistem</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="flex items-center justify-between p-4 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg">
-                            <div class="flex items-center space-x-3">
-                                <div class="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
-                                    <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                                    </svg>
-                                </div>
-                                <span class="font-medium text-gray-700">Status Server</span>
-                            </div>
-                            <span class="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-semibold">Online</span>
-                        </div>
-
-                        <div class="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg">
-                            <div class="flex items-center space-x-3">
-                                <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-                                    <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>
-                                    </svg>
-                                </div>
-                                <span class="font-medium text-gray-700">Database</span>
-                            </div>
-                            <span class="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-semibold">Aktif</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Pengguna Terbaru -->
-                <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-                    <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-xl font-semibold text-gray-800">5 Pengguna Terbaru</h3>
-                        <a href="/cornerbites-sia/admin/users.php" class="text-blue-600 hover:text-blue-800 font-medium text-sm">
-                            Lihat Semua →
-                        </a>
-                    </div>
-                    <div class="space-y-3">
-                        <?php if (!empty($recentUsers)): ?>
-                            <?php foreach ($recentUsers as $user): ?>
-                                <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-                                    <div class="flex items-center space-x-3">
-                                        <div class="w-10 h-10 bg-gradient-to-r from-blue-400 to-purple-500 rounded-full flex items-center justify-center">
-                                            <span class="text-white font-semibold text-sm"><?php echo strtoupper(substr($user['username'], 0, 1)); ?></span>
-                                        </div>
-                                        <div>
-                                            <p class="font-medium text-gray-900"><?php echo htmlspecialchars($user['username']); ?></p>
-                                            <p class="text-sm text-gray-500">
-                                                <span class="px-2 py-1 text-xs font-semibold rounded-full <?php echo $user['role'] === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'; ?>">
-                                                    <?php echo ucfirst($user['role']); ?>
-                                                </span>
-                                            </p>
-                                        </div>
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Log Aktivitas Terbaru</h3>
+                    <div class="space-y-3 max-h-64 overflow-y-auto">
+                        <?php if (!empty($activityLogs)): ?>
+                            <?php foreach ($activityLogs as $log): ?>
+                                <div class="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+                                    <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                                        <?php if ($log['icon'] == 'user-plus'): ?>
+                                            <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                                            </svg>
+                                        <?php else: ?>
+                                            <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+                                            </svg>
+                                        <?php endif; ?>
                                     </div>
-                                    <div class="text-right">
-                                        <p class="text-sm text-gray-500"><?php echo date('d M Y', strtotime($user['created_at'])); ?></p>
-                                        <p class="text-xs text-gray-400"><?php echo date('H:i', strtotime($user['created_at'])); ?></p>
+                                    <div class="flex-1">
+                                        <p class="text-sm text-gray-700"><?php echo htmlspecialchars($log['message']); ?></p>
+                                        <p class="text-xs text-gray-500"><?php echo date('d M Y H:i', strtotime($log['time'])); ?></p>
                                     </div>
                                 </div>
                             <?php endforeach; ?>
                         <?php else: ?>
-                            <div class="text-center py-8">
-                                <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
+                            <div class="text-center py-8 text-gray-500">
+                                <svg class="w-12 h-12 mx-auto mb-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
                                 </svg>
-                                <p class="text-gray-500">Belum ada pengguna terdaftar</p>
+                                <p>Belum ada aktivitas terbaru</p>
                             </div>
                         <?php endif; ?>
                     </div>
                 </div>
+
+                
             </div>
         </main>
     </div>
 </div>
+
 
 <script src="/cornerbites-sia/assets/js/admin.js"></script>
 
