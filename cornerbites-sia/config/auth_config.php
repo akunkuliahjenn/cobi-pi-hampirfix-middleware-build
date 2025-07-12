@@ -1,4 +1,3 @@
-
 <?php
 // config/auth_config.php
 // Konfigurasi keamanan untuk sistem autentikasi
@@ -151,28 +150,24 @@ function recordLoginAttempt($identifier, $success = false) {
  * Secure Session Management
  */
 function secureSessionStart() {
-    // Konfigurasi session hanya jika belum ada session aktif
+    // Only configure session settings if session is not active
     if (session_status() == PHP_SESSION_NONE) {
-        // Set konfigurasi session sebelum memulai session
+        // Configure session settings before starting
         ini_set('session.cookie_httponly', 1);
-        ini_set('session.cookie_secure', isset($_SERVER['HTTPS']) ? 1 : 0);
-        ini_set('session.cookie_samesite', 'Strict');
-        ini_set('session.use_strict_mode', 1);
+        ini_set('session.use_only_cookies', 1);
+        ini_set('session.cookie_secure', 0); // Set to 1 if using HTTPS
+        ini_set('session.cookie_samesite', 'Lax');
+        ini_set('session.gc_maxlifetime', 1800); // 30 minutes
         
         session_start();
     }
-    
-    // Regenerate session ID secara berkala
+
+    // Regenerate session ID periodically for security
     if (!isset($_SESSION['last_regeneration'])) {
         $_SESSION['last_regeneration'] = time();
-    } elseif (time() - $_SESSION['last_regeneration'] > SESSION_REGENERATE_INTERVAL) {
-        if (headers_sent()) {
-            // Jika headers sudah dikirim, skip regeneration
-            error_log("Cannot regenerate session ID - headers already sent");
-        } else {
-            session_regenerate_id(true);
-            $_SESSION['last_regeneration'] = time();
-        }
+    } elseif (time() - $_SESSION['last_regeneration'] > 300) { // 5 minutes
+        session_regenerate_id(true);
+        $_SESSION['last_regeneration'] = time();
     }
 }
 ?>

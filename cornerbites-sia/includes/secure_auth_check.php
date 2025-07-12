@@ -75,6 +75,63 @@ function getCurrentUser() {
 }
 
 /**
+ * STRICT Role-Based Access Control
+ */
+function enforceRoleBasedAccess() {
+    $current_page = $_SERVER['PHP_SELF'];
+    $user_role = $_SESSION['user_role'] ?? 'guest';
+    
+    // Define strict page access rules
+    $admin_only_pages = [
+        '/cornerbites-sia/admin/dashboard.php',
+        '/cornerbites-sia/admin/users.php',
+        '/cornerbites-sia/admin/semua_transaksi.php',
+        '/cornerbites-sia/admin/statistik.php',
+        '/cornerbites-sia/admin/reset_password.php',
+        '/cornerbites-sia/admin/debug_users_admin.php'
+    ];
+    
+    $user_only_pages = [
+        '/cornerbites-sia/pages/dashboard.php',
+        '/cornerbites-sia/pages/bahan_baku.php',
+        '/cornerbites-sia/pages/produk.php',
+        '/cornerbites-sia/pages/resep_produk.php',
+        '/cornerbites-sia/pages/overhead_management.php'
+    ];
+    
+    // Check admin trying to access user pages
+    if ($user_role === 'admin' && in_array($current_page, $user_only_pages)) {
+        $_SESSION['error_message'] = 'Akses ditolak. Admin tidak dapat mengakses halaman user. Gunakan dashboard admin.';
+        header("Location: /cornerbites-sia/admin/dashboard.php");
+        exit();
+    }
+    
+    // Check user trying to access admin pages
+    if ($user_role === 'user' && in_array($current_page, $admin_only_pages)) {
+        $_SESSION['error_message'] = 'Akses ditolak. Anda tidak memiliki izin admin.';
+        header("Location: /cornerbites-sia/pages/dashboard.php");
+        exit();
+    }
+    
+    // Additional check: prevent direct access via URL manipulation
+    $request_uri = $_SERVER['REQUEST_URI'];
+    
+    // Block admin from accessing user URLs
+    if ($user_role === 'admin' && strpos($request_uri, '/pages/') !== false) {
+        $_SESSION['error_message'] = 'Akses ditolak. URL tidak valid untuk role admin.';
+        header("Location: /cornerbites-sia/admin/dashboard.php");
+        exit();
+    }
+    
+    // Block user from accessing admin URLs
+    if ($user_role === 'user' && strpos($request_uri, '/admin/') !== false) {
+        $_SESSION['error_message'] = 'Akses ditolak. URL tidak valid untuk role user.';
+        header("Location: /cornerbites-sia/pages/dashboard.php");
+        exit();
+    }
+}
+
+/**
  * Main authentication check
  */
 if (!verifyAuthentication()) {
@@ -87,22 +144,8 @@ if (!verifyAuthentication()) {
     exit();
 }
 
-// Check role-based access
-$current_page = $_SERVER['PHP_SELF'];
-$admin_pages = [
-    '/cornerbites-sia/admin/dashboard.php',
-    '/cornerbites-sia/admin/users.php',
-    '/cornerbites-sia/admin/semua_transaksi.php',
-    '/cornerbites-sia/admin/statistik.php',
-];
-
-if (in_array($current_page, $admin_pages)) {
-    if (!hasRole('admin')) {
-        $_SESSION['error_message'] = 'Akses ditolak. Anda tidak memiliki izin admin.';
-        header("Location: /cornerbites-sia/pages/dashboard.php");
-        exit();
-    }
-}
+// Apply strict role-based access control
+enforceRoleBasedAccess();
 
 // Generate CSRF token for forms
 $csrf_token = generateCSRFToken();

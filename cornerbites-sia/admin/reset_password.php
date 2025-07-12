@@ -43,6 +43,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $stmt = $db->prepare("UPDATE users SET password = ?, must_change_password = 1 WHERE id = ?");
 
         if ($stmt->execute([$hashed_password, $user_id])) {
+            // Verify the update worked
+            $verifyStmt = $db->prepare("SELECT password FROM users WHERE id = ?");
+            $verifyStmt->execute([$user_id]);
+            $updated_user = $verifyStmt->fetch();
+
+            if (!$updated_user || !password_verify($new_password, $updated_user['password'])) {
+                $_SESSION['reset_message'] = ['text' => 'Gagal memperbarui password. Silakan coba lagi.', 'type' => 'error'];
+                header("Location: /cornerbites-sia/admin/users.php");
+                exit();
+            }
+
             // Log reset password activity
             require_once __DIR__ . '/../includes/activity_logger.php';
             logActivity($_SESSION['user_id'], $_SESSION['username'], 'reset_password', 'Admin mereset password untuk User ' . $user_info['username'], $db);

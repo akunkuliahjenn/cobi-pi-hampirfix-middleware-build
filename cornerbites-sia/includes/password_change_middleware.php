@@ -6,38 +6,101 @@
 function enforcePasswordChangeMiddleware() {
     global $db;
     
-    // Skip jika di halaman change_password.php atau logout
+    // Skip jika di halaman change_password.php, logout, atau login
     $current_page = $_SERVER['PHP_SELF'];
-    if (strpos($current_page, 'change_password.php') !== false || 
-        strpos($current_page, 'logout.php') !== false) {
+    $skip_pages = [
+        'change_password.php',
+        'logout.php',
+        'login.php',
+        'register.php'
+    ];
+    
+    $should_skip = false;
+    foreach ($skip_pages as $skip_page) {
+        if (strpos($current_page, $skip_page) !== false) {
+            $should_skip = true;
+            break;
+        }
+    }
+    
+    if ($should_skip) {
+        return;
+    }
+    
+    // Pastikan user sudah login
+    if (!isset($_SESSION['user_id'])) {
         return;
     }
     
     // Cek database untuk memastikan status terkini
-    $stmt = $db->prepare("SELECT must_change_password FROM users WHERE id = ?");
-    $stmt->execute([$_SESSION['user_id']]);
-    $user = $stmt->fetch();
-    
-    // Jika user harus ganti password, paksa redirect
-    if ($user && $user['must_change_password'] == 1) {
-        // Set session flag
-        $_SESSION['must_change_password'] = true;
-        $_SESSION['redirect_attempted'] = $current_page;
+    try {
+        $stmt = $db->prepare("SELECT must_change_password, username FROM users WHERE id = ?");
+        $stmt->execute([$_SESSION['user_id']]);
+        $user = $stmt->fetch();
         
-        // Clear any bypass attempts
-        session_regenerate_id(true);
+        // Jika user harus ganti password, paksa redirect
+        if ($user && $user['must_change_password'] == 1) {
+            // Set session flags minimal
+            $_SESSION['must_change_password'] = true;
+            $_SESSION['force_password_change'] = true;
+            
+            // Generate token jika belum ada
+            if (!isset($_SESSION['password_change_token'])) {
+                $_SESSION['password_change_token'] = bin2hex(random_bytes(32));
+            }
+            
+            // Log attempted access
+            error_log("Password change required - User {$user['username']} attempted to access {$current_page}");
+            
+            // Force redirect dengan multiple methods
+            if (!headers_sent()) {
+                header("Location: /cornerbites-sia/auth/change_password.php", true, 302);
+                header("Cache-Control: no-cache, no-store, must-revalidate");
+                header("Pragma: no-cache");
+                header("Expires: 0");
+            }
+            
+            // JavaScript redirect sebagai backup
+            echo "<script type='text/javascript'>";
+            echo "window.location.replace('/cornerbites-sia/auth/change_password.php');";
+            echo "if (window.history && window.history.pushState) {";
+            echo "  for (let i = 0; i < 10; i++) {";
+            echo "    window.history.pushState(null, null, '/cornerbites-sia/auth/change_password.php');";
+            echo "  }";
+            echo "}";
+            echo "</script>";
+            
+            // Meta redirect sebagai backup kedua
+            echo "<meta http-equiv='refresh' content='0; url=/cornerbites-sia/auth/change_password.php'>";
+            
+            // Final backup dengan noscript
+            echo "<noscript>";
+            echo "<meta http-equiv='refresh' content='0; url=/cornerbites-sia/auth/change_password.php'>";
+            echo "</noscript>";
+            
+            // Exit dengan pesan untuk debugging
+            exit("Redirecting to password change page...");
+        }
         
-        // Force redirect dengan header yang tidak bisa di-bypass
-        header("Location: /cornerbites-sia/auth/change_password.php", true, 302);
+        // Clear flags jika password tidak perlu diganti
+        if (isset($_SESSION['must_change_password'])) {
+            unset($_SESSION['must_change_password']);
+            unset($_SESSION['force_password_change']);
+            unset($_SESSION['password_change_token']);
+            unset($_SESSION['password_change_required_timestamp']);
+        }
         
-        // Multiple redirect methods untuk memastikan
-        echo "<script>window.location.replace('/cornerbites-sia/auth/change_password.php');</script>";
-        echo "<meta http-equiv='refresh' content='0; url=/cornerbites-sia/auth/change_password.php'>";
-        
+    } catch (PDOException $e) {
+        // Log error dan redirect ke login jika ada masalah database
+        error_log("Password change middleware error: " . $e->getMessage());
+        $_SESSION['error_message'] = 'Terjadi kesalahan sistem. Silakan login ulang.';
+        header("Location: /cornerbites-sia/auth/login.php");
         exit();
     }
 }
 
 // Auto-apply middleware jika file ini di-include
-enforcePasswordChangeMiddleware();
+if (session_status() == PHP_SESSION_ACTIVE && isset($_SESSION['user_id'])) {
+    enforcePasswordChangeMiddleware();
+}
 ?>

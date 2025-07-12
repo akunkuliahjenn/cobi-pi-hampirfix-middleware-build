@@ -5,7 +5,19 @@
 require_once __DIR__ . '/../config/auth_config.php';
 require_once __DIR__ . '/../config/db.php';
 
-// Start secure session
+// Configure session cookie parameters BEFORE starting session
+if (!headers_sent()) {
+    session_set_cookie_params([
+        'lifetime' => 0, // Session cookie
+        'path' => '/',
+        'domain' => '',
+        'secure' => false, // Set to true if using HTTPS
+        'httponly' => true,
+        'samesite' => 'Lax'
+    ]);
+}
+
+// Start secure session with proper cookie settings
 secureSessionStart();
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
@@ -72,6 +84,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             // Cek apakah user harus ganti password
             if (isset($user['must_change_password']) && $user['must_change_password'] == 1) {
                 $_SESSION['must_change_password'] = true;
+                $_SESSION['force_password_change'] = true;
+                $_SESSION['password_change_token'] = bin2hex(random_bytes(32));
+                $_SESSION['password_change_start_time'] = time();
+                $_SESSION['success_message'] = 'Login berhasil! Anda harus mengganti password sebelum melanjutkan.';
                 header("Location: /cornerbites-sia/auth/change_password.php");
                 exit();
             }

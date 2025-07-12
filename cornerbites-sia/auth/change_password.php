@@ -1,3 +1,4 @@
+
 <?php
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../config/db.php';
@@ -5,28 +6,69 @@ require_once __DIR__ . '/../config/db.php';
 // SUPER STRICT MIDDLEWARE - NO BYPASS ALLOWED
 function enforcePasswordChange() {
     global $db;
+
+    // Debug session state
+    error_log("Change password access - Session data: " . print_r($_SESSION, true));
     
-    // Always check database first - this is the source of truth
-    $stmt = $db->prepare("SELECT must_change_password, username FROM users WHERE id = ?");
-    $stmt->execute([$_SESSION['user_id']]);
-    $user = $stmt->fetch();
-    
-    // If user not found or doesn't need to change password, redirect appropriately
-    if (!$user || $user['must_change_password'] != 1) {
-        if ($_SESSION['user_role'] === 'admin') {
-            header("Location: /cornerbites-sia/admin/dashboard.php");
-        } else {
-            header("Location: /cornerbites-sia/pages/dashboard.php");
-        }
+    // Validate session first
+    if (!isset($_SESSION['user_id']) || empty($_SESSION['user_id'])) {
+        error_log("Change password: No valid session found, redirecting to login");
+        session_destroy();
+        $_SESSION['error_message'] = 'Sesi tidak valid. Silakan login kembali.';
+        header("Location: /cornerbites-sia/auth/login.php");
         exit();
     }
-    
-    // Set session flags
-    $_SESSION['must_change_password'] = true;
-    $_SESSION['force_password_change'] = true;
-    
-    // Clear any potential bypass attempts
-    $_SESSION['password_change_token'] = bin2hex(random_bytes(32));
+
+    // Always check database first - this is the source of truth
+    try {
+        $stmt = $db->prepare("SELECT must_change_password, username, role FROM users WHERE id = ?");
+        $stmt->execute([$_SESSION['user_id']]);
+        $user = $stmt->fetch();
+
+        // If user not found, force logout
+        if (!$user) {
+            session_destroy();
+            $_SESSION['error_message'] = 'User tidak ditemukan. Silakan login ulang.';
+            header("Location: /cornerbites-sia/auth/login.php");
+            exit();
+        }
+
+        // If user doesn't need to change password, redirect appropriately
+        if ($user['must_change_password'] != 1) {
+            // Clear any password change flags
+            unset($_SESSION['must_change_password']);
+            unset($_SESSION['force_password_change']);
+            unset($_SESSION['password_change_token']);
+
+            if ($user['role'] === 'admin') {
+                header("Location: /cornerbites-sia/admin/dashboard.php");
+            } else {
+                header("Location: /cornerbites-sia/pages/dashboard.php");
+            }
+            exit();
+        }
+
+        // Set session flags
+        $_SESSION['must_change_password'] = true;
+        $_SESSION['force_password_change'] = true;
+        $_SESSION['username'] = $user['username'];
+        $_SESSION['user_role'] = $user['role'];
+
+        // Generate unique token untuk mencegah bypass
+        $_SESSION['password_change_token'] = bin2hex(random_bytes(32));
+        $_SESSION['password_change_start_time'] = time();
+
+        // Anti-tampering measures
+        $_SESSION['password_change_ip'] = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $_SESSION['password_change_user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
+
+    } catch (PDOException $e) {
+        error_log("Password change enforcement error: " . $e->getMessage());
+        session_destroy();
+        $_SESSION['error_message'] = 'Terjadi kesalahan sistem. Silakan login ulang.';
+        header("Location: /cornerbites-sia/auth/login.php");
+        exit();
+    }
 }
 
 // Apply the middleware
@@ -36,43 +78,66 @@ $message = '';
 $message_type = '';
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $new_password = trim($_POST['new_password']);
-    $confirm_password = trim($_POST['confirm_password']);
+    // Validate token untuk mencegah bypass
+    // Simplified token validation - jika tidak ada token, buat yang baru
+    if (!isset($_SESSION['password_change_token'])) {
+        $_SESSION['password_change_token'] = bin2hex(random_bytes(32));
+    }
     
-    if (empty($new_password) || strlen($new_password) < 6) {
-        $message = 'Password minimal 6 karakter.';
-        $message_type = 'error';
-    } elseif ($new_password !== $confirm_password) {
-        $message = 'Konfirmasi password tidak cocok.';
-        $message_type = 'error';
-    } else {
-        try {
-            $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
-            $stmt = $db->prepare("UPDATE users SET password = ?, must_change_password = 0 WHERE id = ?");
-            
-            if ($stmt->execute([$hashed_password, $_SESSION['user_id']])) {
-                // Log password change activity
-                require_once __DIR__ . '/../includes/activity_logger.php';
-                logActivity($_SESSION['user_id'], $_SESSION['username'], 'change_password', 'User mengganti password setelah reset admin', $db);
-
-                // Clear the must change password flag
-                unset($_SESSION['must_change_password']);
-
-                // Regenerate session ID for security
-                session_regenerate_id(true);
-
-                $_SESSION['success_message'] = 'Password berhasil diubah! Sesi Anda telah diperbarui untuk keamanan.';
-
-                if ($_SESSION['user_role'] === 'admin') {
-                    header("Location: /cornerbites-sia/admin/dashboard.php");
-                } else {
-                    header("Location: /cornerbites-sia/pages/dashboard.php");
-                }
-                exit();
-            }
-        } catch (PDOException $e) {
-            $message = 'Error: ' . $e->getMessage();
+    // Skip token validation jika form pertama kali diload
+    if (!isset($_POST['password_change_token']) || $_POST['password_change_token'] !== $_SESSION['password_change_token']) {
+        if (isset($_POST['new_password'])) {
+            $message = 'Token keamanan tidak valid. Silakan coba lagi.';
             $message_type = 'error';
+            $_SESSION['password_change_token'] = bin2hex(random_bytes(32));
+        }
+    } else {
+        $new_password = trim($_POST['new_password']);
+        $confirm_password = trim($_POST['confirm_password']);
+    
+        if (empty($new_password) || strlen($new_password) < 6) {
+            $message = 'Password minimal 6 karakter.';
+            $message_type = 'error';
+        } elseif ($new_password !== $confirm_password) {
+            $message = 'Konfirmasi password tidak cocok.';
+            $message_type = 'error';
+        } else {
+            try {
+                $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
+                $stmt = $db->prepare("UPDATE users SET password = ?, must_change_password = 0 WHERE id = ?");
+                
+                if ($stmt->execute([$hashed_password, $_SESSION['user_id']])) {
+                    // Clear session flags immediately
+                    unset($_SESSION['must_change_password']);
+                    unset($_SESSION['force_password_change']);
+                    unset($_SESSION['password_change_token']);
+                    
+                    // Log password change activity
+                    if (file_exists(__DIR__ . '/../includes/activity_logger.php')) {
+                        require_once __DIR__ . '/../includes/activity_logger.php';
+                        logActivity($_SESSION['user_id'], $_SESSION['username'], 'change_password', 'User mengganti password setelah reset admin', $db);
+                    }
+
+                    // Regenerate session ID for security
+                    session_regenerate_id(true);
+
+                    // Set success message and redirect
+                    $_SESSION['success_message'] = 'Password berhasil diubah! Selamat datang kembali.';
+
+                    if ($_SESSION['user_role'] === 'admin') {
+                        header("Location: /cornerbites-sia/admin/dashboard.php");
+                    } else {
+                        header("Location: /cornerbites-sia/pages/dashboard.php");
+                    }
+                    exit();
+                } else {
+                    $message = 'Gagal memperbarui password. Silakan coba lagi.';
+                    $message_type = 'error';
+                }
+            } catch (PDOException $e) {
+                $message = 'Error: ' . $e->getMessage();
+                $message_type = 'error';
+            }
         }
     }
 }
