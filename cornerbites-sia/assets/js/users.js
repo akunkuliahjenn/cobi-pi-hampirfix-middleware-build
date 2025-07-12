@@ -16,6 +16,15 @@ function initializeUserManagement() {
     if (roleFilter) {
         roleFilter.addEventListener('change', handleRoleFilter);
     }
+
+    // Auto-hide alerts after 5 seconds
+    const alerts = document.querySelectorAll('.alert-auto-hide');
+    alerts.forEach(alert => {
+        setTimeout(() => {
+            alert.style.opacity = '0';
+            setTimeout(() => alert.remove(), 300);
+        }, 5000);
+    });
 }
 
 // Debounce function for search
@@ -37,7 +46,11 @@ function handleSearch() {
     const roleFilter = document.getElementById('filterRole').value;
     
     const url = new URL(window.location);
-    url.searchParams.set('search', searchTerm);
+    if (searchTerm.trim()) {
+        url.searchParams.set('search', searchTerm);
+    } else {
+        url.searchParams.delete('search');
+    }
     url.searchParams.set('page', '1'); // Reset to first page
     if (roleFilter) {
         url.searchParams.set('role', roleFilter);
@@ -50,95 +63,123 @@ function handleSearch() {
 
 // Handle role filter
 function handleRoleFilter() {
-    const searchTerm = document.getElementById('searchUser').value;
     const roleFilter = document.getElementById('filterRole').value;
+    const searchTerm = document.getElementById('searchUser').value;
     
     const url = new URL(window.location);
-    if (searchTerm) {
-        url.searchParams.set('search', searchTerm);
-    }
+    url.searchParams.set('page', '1'); // Reset to first page
     if (roleFilter) {
         url.searchParams.set('role', roleFilter);
     } else {
         url.searchParams.delete('role');
     }
-    url.searchParams.set('page', '1'); // Reset to first page
+    if (searchTerm.trim()) {
+        url.searchParams.set('search', searchTerm);
+    }
     
     window.location.href = url.toString();
 }
 
-// Show Add User Modal
+// Show add user modal
 function showAddUserModal() {
     document.getElementById('modalTitle').textContent = 'Tambah Pengguna';
     document.getElementById('user_id_to_edit').value = '';
     document.getElementById('username').value = '';
     document.getElementById('password').value = '';
     document.getElementById('role').value = 'user';
-    document.getElementById('password').required = true;
     document.getElementById('passwordHelp').textContent = 'Minimal 6 karakter.';
+    document.getElementById('password').required = true;
     document.getElementById('userModal').classList.remove('hidden');
 }
 
-// Hide User Modal
-function hideUserModal() {
-    document.getElementById('userModal').classList.add('hidden');
-}
-
-// Edit User Function
+// Show edit user modal
 function editUser(userId, username, role) {
     document.getElementById('modalTitle').textContent = 'Edit Pengguna';
     document.getElementById('user_id_to_edit').value = userId;
     document.getElementById('username').value = username;
     document.getElementById('password').value = '';
     document.getElementById('role').value = role;
-    document.getElementById('password').required = false;
     document.getElementById('passwordHelp').textContent = 'Minimal 6 karakter. Kosongkan jika tidak ingin mengubah password.';
+    document.getElementById('password').required = false;
     document.getElementById('userModal').classList.remove('hidden');
 }
 
-// Show Reset Password Modal
+// Hide user modal
+function hideUserModal() {
+    document.getElementById('userModal').classList.add('hidden');
+}
+
+// Show reset password modal
 function showResetPasswordModal(userId, username) {
     document.getElementById('resetUserId').value = userId;
     document.getElementById('resetUsername').textContent = username;
     document.getElementById('resetPasswordModal').classList.remove('hidden');
 }
 
-// Hide Reset Password Modal
+// Hide reset password modal
 function hideResetPasswordModal() {
     document.getElementById('resetPasswordModal').classList.add('hidden');
 }
 
-// Delete User Function
+// Reset password function (updated)
+function resetPassword(userId, username) {
+    showResetPasswordModal(userId, username);
+}
+
+// Delete user function
 function deleteUser(userId, username) {
-    if (confirm(`Apakah Anda yakin ingin menghapus user "${username}"? Tindakan ini tidak dapat dibatalkan.`)) {
-        // Create form and submit
+    if (confirm(`Apakah Anda yakin ingin menghapus pengguna "${username}"?\n\nSemua data terkait pengguna ini akan ikut terhapus!`)) {
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = '/cornerbites-sia/process/hapus_user.php';
-        
-        const userIdInput = document.createElement('input');
-        userIdInput.type = 'hidden';
-        userIdInput.name = 'user_id';
-        userIdInput.value = userId;
-        
-        form.appendChild(userIdInput);
+
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'user_id';
+        input.value = userId;
+
+        form.appendChild(input);
         document.body.appendChild(form);
         form.submit();
     }
 }
 
-// Auto hide alerts
-document.addEventListener('DOMContentLoaded', function() {
-    const alerts = document.querySelectorAll('.alert-auto-hide');
-    alerts.forEach(function(alert) {
-        setTimeout(function() {
-            alert.style.transition = 'opacity 0.5s ease-out';
-            alert.style.opacity = '0';
-            setTimeout(function() {
-                if (alert.parentNode) {
-                    alert.parentNode.removeChild(alert);
-                }
-            }, 500);
-        }, 5000);
-    });
+// Close modal when clicking outside
+document.addEventListener('click', function(event) {
+    const userModal = document.getElementById('userModal');
+    const resetModal = document.getElementById('resetPasswordModal');
+    
+    if (event.target === userModal) {
+        hideUserModal();
+    }
+    
+    if (event.target === resetModal) {
+        hideResetPasswordModal();
+    }
+});
+
+// Handle escape key
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        hideUserModal();
+        hideResetPasswordModal();
+    }
+});
+
+// Form validation
+document.getElementById('userForm')?.addEventListener('submit', function(e) {
+    const password = document.getElementById('password').value;
+    const isEdit = document.getElementById('user_id_to_edit').value !== '';
+    
+    if (!isEdit && password.length < 6) {
+        e.preventDefault();
+        alert('Password minimal 6 karakter!');
+        return false;
+    }
+    
+    if (isEdit && password && password.length < 6) {
+        e.preventDefault();
+        alert('Password minimal 6 karakter!');
+        return false;
+    }
 });

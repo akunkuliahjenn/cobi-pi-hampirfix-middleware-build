@@ -1,4 +1,3 @@
-
 <?php
 // admin/users.php
 // Kelola pengguna - hanya admin yang bisa mengakses
@@ -29,84 +28,75 @@ $roleFilter = isset($_GET['role']) ? trim($_GET['role']) : '';
 
 try {
     $conn = $db;
-    
+
     // Debug: Cek koneksi database
     if (!$conn) {
         throw new Exception("Koneksi database gagal");
     }
-    
-    // Debug: Test query sederhana
-    $testQuery = $conn->query("SELECT 1");
-    if (!$testQuery) {
-        throw new Exception("Query test gagal");
-    }
-    
-    error_log("DEBUG: Koneksi database berhasil di users.php");
 
-    // Base query untuk menghitung total
+    // Statistik umum - ambil dulu sebelum filter
+    $stmtTotalUsers = $conn->query("SELECT COUNT(*) FROM users");
+    $totalUsers = $stmtTotalUsers ? (int)$stmtTotalUsers->fetchColumn() : 0;
+
+    $stmtTotalAdmins = $conn->query("SELECT COUNT(*) FROM users WHERE role = 'admin'");
+    $totalAdmins = $stmtTotalAdmins ? (int)$stmtTotalAdmins->fetchColumn() : 0;
+
+    $stmtTotalRegularUsers = $conn->query("SELECT COUNT(*) FROM users WHERE role = 'user'");
+    $totalRegularUsers = $stmtTotalRegularUsers ? (int)$stmtTotalRegularUsers->fetchColumn() : 0;
+
+    // Base query untuk menghitung total dengan filter
     $baseQuery = "SELECT COUNT(*) FROM users WHERE 1=1";
     $params = [];
 
     // Tambahkan filter pencarian
     if (!empty($search)) {
-        $baseQuery .= " AND username LIKE :search";
-        $params['search'] = '%' . $search . '%';
+        $baseQuery .= " AND username LIKE ?";
+        $params[] = '%' . $search . '%';
     }
 
     // Tambahkan filter role
     if (!empty($roleFilter)) {
-        $baseQuery .= " AND role = :role";
-        $params['role'] = $roleFilter;
+        $baseQuery .= " AND role = ?";
+        $params[] = $roleFilter;
     }
 
     // Hitung total users dengan filter
     $stmt = $conn->prepare($baseQuery);
     $stmt->execute($params);
-    $totalFilteredUsers = $stmt->fetchColumn();
+    $totalFilteredUsers = (int)$stmt->fetchColumn();
 
     // Query untuk mendapatkan data users dengan pagination
     $userQuery = "SELECT id, username, role, created_at, last_login_at FROM users WHERE 1=1";
-    
+    $userParams = [];
+
     if (!empty($search)) {
-        $userQuery .= " AND username LIKE :search";
+        $userQuery .= " AND username LIKE ?";
+        $userParams[] = '%' . $search . '%';
     }
-    
+
     if (!empty($roleFilter)) {
-        $userQuery .= " AND role = :role";
+        $userQuery .= " AND role = ?";
+        $userParams[] = $roleFilter;
     }
-    
-    $userQuery .= " ORDER BY created_at DESC LIMIT :limit OFFSET :offset";
-    
+
+    $userQuery .= " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+    $userParams[] = $limit;
+    $userParams[] = $offset;
+
     $stmt = $conn->prepare($userQuery);
-    
-    // Bind parameters
-    if (!empty($search)) {
-        $stmt->bindValue(':search', '%' . $search . '%', PDO::PARAM_STR);
-    }
-    
-    if (!empty($roleFilter)) {
-        $stmt->bindValue(':role', $roleFilter, PDO::PARAM_STR);
-    }
-    
-    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-    
-    $stmt->execute();
+    $stmt->execute($userParams);
     $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Statistik umum
-    $stmtTotalUsers = $conn->query("SELECT COUNT(*) FROM users");
-    $totalUsers = $stmtTotalUsers->fetchColumn() ?: 0;
-    
-    $stmtTotalAdmins = $conn->query("SELECT COUNT(*) FROM users WHERE role = 'admin'");
-    $totalAdmins = $stmtTotalAdmins->fetchColumn() ?: 0;
-    
-    $stmtTotalRegularUsers = $conn->query("SELECT COUNT(*) FROM users WHERE role = 'user'");
-    $totalRegularUsers = $stmtTotalRegularUsers->fetchColumn() ?: 0;
+    error_log("DEBUG: Total users found: " . $totalUsers . ", Admin: " . $totalAdmins . ", Regular: " . $totalRegularUsers);
+    error_log("DEBUG: Users data: " . print_r($users, true));
 
-} catch (PDOException $e) {
+} catch (Exception $e) {
     error_log("Error di Users Admin: " . $e->getMessage());
     $users = [];
+    $totalUsers = 0;
+    $totalAdmins = 0;
+    $totalRegularUsers = 0;
+    $totalFilteredUsers = 0;
 }
 
 // Hitung total halaman
@@ -218,9 +208,6 @@ if (isset($_SESSION['user_management_message'])) {
                                     <option value="admin" <?php echo $roleFilter === 'admin' ? 'selected' : ''; ?>>Admin</option>
                                     <option value="user" <?php echo $roleFilter === 'user' ? 'selected' : ''; ?>>User</option>
                                 </select>
-                                <button onclick="showAddUserModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors">
-                                    Tambah Pengguna
-                                </button>
                             </div>
                         </div>
 
@@ -364,14 +351,11 @@ if (isset($_SESSION['user_management_message'])) {
                                 <h3 class="text-lg font-medium text-gray-900 mb-2">Tidak ada pengguna ditemukan</h3>
                                 <p class="text-gray-500 mb-4">
                                     <?php if (!empty($search) || !empty($roleFilter)): ?>
-                                        Coba ubah filter pencarian atau tambahkan pengguna baru.
+                                        Coba ubah filter pencarian.
                                     <?php else: ?>
-                                        Mulai dengan menambahkan pengguna baru.
+                                        Belum ada pengguna yang terdaftar di sistem.
                                     <?php endif; ?>
                                 </p>
-                                <button onclick="showAddUserModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors">
-                                    Tambah Pengguna
-                                </button>
                             </div>
                         <?php endif; ?>
                     </div>
@@ -463,3 +447,4 @@ if (isset($_SESSION['user_management_message'])) {
 <script src="/cornerbites-sia/assets/js/users.js"></script>
 
 <?php include_once __DIR__ . '/../includes/footer.php'; ?>
+</replit_final_file>
