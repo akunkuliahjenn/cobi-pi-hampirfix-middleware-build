@@ -1,4 +1,3 @@
-
 <?php
 // admin/dashboard.php
 // Dashboard admin yang fokus pada statistik pengguna dan manajemen sistem
@@ -142,7 +141,6 @@ if (isset($_SESSION['admin_message'])) {
         <header class="bg-white shadow-sm border-b border-gray-200">
             <div class="px-6 py-4">
                 <h1 class="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
-                <p class="text-gray-600 mt-1">Kelola dan pantau sistem Corner Bites SIA</p>
             </div>
         </header>
 

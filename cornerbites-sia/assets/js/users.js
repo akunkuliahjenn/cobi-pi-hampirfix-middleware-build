@@ -1,4 +1,3 @@
-
 // Users Management JavaScript
 document.addEventListener('DOMContentLoaded', function() {
     initializeUserManagement();
@@ -97,10 +96,7 @@ function editUser(userId, username, role) {
     document.getElementById('modalTitle').textContent = 'Edit Pengguna';
     document.getElementById('user_id_to_edit').value = userId;
     document.getElementById('username').value = username;
-    document.getElementById('password').value = '';
     document.getElementById('role').value = role;
-    document.getElementById('passwordHelp').textContent = 'Minimal 6 karakter. Kosongkan jika tidak ingin mengubah password.';
-    document.getElementById('password').required = false;
     document.getElementById('userModal').classList.remove('hidden');
 }
 

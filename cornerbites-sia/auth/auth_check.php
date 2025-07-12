@@ -48,18 +48,8 @@ if (in_array($current_page, $admin_pages)) {
     // }
 }
 
-// Check if user is logged in
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['username'])) {
-    header("Location: /cornerbites-sia/auth/login.php");
-    exit();
-}
-
-// Ensure user_role is set (for backward compatibility)
-if (!isset($_SESSION['user_role']) && isset($_SESSION['role'])) {
-    $_SESSION['user_role'] = $_SESSION['role'];
-} elseif (!isset($_SESSION['role']) && isset($_SESSION['user_role'])) {
-    $_SESSION['role'] = $_SESSION['user_role'];
-}
+// Middleware tambahan: Cek apakah user harus ganti password
+require_once __DIR__ . '/password_change_middleware.php';
 
 // Jika sampai di sini, artinya user sudah login dan memiliki role yang sesuai
 ?>

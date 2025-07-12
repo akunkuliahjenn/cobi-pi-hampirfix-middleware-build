@@ -34,15 +34,24 @@ try {
         throw new Exception("Koneksi database gagal");
     }
 
+    // Test koneksi dengan query sederhana
+    $testQuery = $conn->query("SELECT 1");
+    if (!$testQuery) {
+        throw new Exception("Koneksi database tidak responsif");
+    }
+
     // Statistik umum - ambil dulu sebelum filter
-    $stmtTotalUsers = $conn->query("SELECT COUNT(*) FROM users");
-    $totalUsers = $stmtTotalUsers ? (int)$stmtTotalUsers->fetchColumn() : 0;
+    $stmtTotalUsers = $conn->prepare("SELECT COUNT(*) FROM users");
+    $stmtTotalUsers->execute();
+    $totalUsers = (int)$stmtTotalUsers->fetchColumn();
 
-    $stmtTotalAdmins = $conn->query("SELECT COUNT(*) FROM users WHERE role = 'admin'");
-    $totalAdmins = $stmtTotalAdmins ? (int)$stmtTotalAdmins->fetchColumn() : 0;
+    $stmtTotalAdmins = $conn->prepare("SELECT COUNT(*) FROM users WHERE role = 'admin'");
+    $stmtTotalAdmins->execute();
+    $totalAdmins = (int)$stmtTotalAdmins->fetchColumn();
 
-    $stmtTotalRegularUsers = $conn->query("SELECT COUNT(*) FROM users WHERE role = 'user'");
-    $totalRegularUsers = $stmtTotalRegularUsers ? (int)$stmtTotalRegularUsers->fetchColumn() : 0;
+    $stmtTotalRegularUsers = $conn->prepare("SELECT COUNT(*) FROM users WHERE role = 'user'");
+    $stmtTotalRegularUsers->execute();
+    $totalRegularUsers = (int)$stmtTotalRegularUsers->fetchColumn();
 
     // Base query untuk menghitung total dengan filter
     $baseQuery = "SELECT COUNT(*) FROM users WHERE 1=1";
@@ -62,11 +71,13 @@ try {
 
     // Hitung total users dengan filter
     $stmt = $conn->prepare($baseQuery);
-    $stmt->execute($params);
+    if (!$stmt->execute($params)) {
+        throw new Exception("Gagal menjalankan query count users");
+    }
     $totalFilteredUsers = (int)$stmt->fetchColumn();
 
     // Query untuk mendapatkan data users dengan pagination
-    $userQuery = "SELECT id, username, role, created_at, last_login_at FROM users WHERE 1=1";
+    $userQuery = "SELECT id, username, role, created_at FROM users WHERE 1=1";
     $userParams = [];
 
     if (!empty($search)) {
@@ -79,19 +90,43 @@ try {
         $userParams[] = $roleFilter;
     }
 
-    $userQuery .= " ORDER BY created_at DESC LIMIT ? OFFSET ?";
-    $userParams[] = $limit;
-    $userParams[] = $offset;
+    $userQuery .= " ORDER BY created_at DESC LIMIT ?, ?";
+    $userParams[] = (int)$offset;
+    $userParams[] = (int)$limit;
 
     $stmt = $conn->prepare($userQuery);
-    $stmt->execute($userParams);
+
+    // Bind parameters with explicit types for LIMIT clause
+    for ($i = 0; $i < count($userParams); $i++) {
+        if ($i >= count($userParams) - 2) { // Last two parameters are for LIMIT
+            $stmt->bindValue($i + 1, $userParams[$i], PDO::PARAM_INT);
+        } else {
+            $stmt->bindValue($i + 1, $userParams[$i], PDO::PARAM_STR);
+        }
+    }
+
+    if (!$stmt->execute()) {
+        throw new Exception("Gagal menjalankan query select users");
+    }
     $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     error_log("DEBUG: Total users found: " . $totalUsers . ", Admin: " . $totalAdmins . ", Regular: " . $totalRegularUsers);
-    error_log("DEBUG: Users data: " . print_r($users, true));
+    error_log("DEBUG: Total filtered users: " . $totalFilteredUsers);
+    error_log("DEBUG: Users data count: " . count($users));
+    error_log("DEBUG: Search: '$search', Role Filter: '$roleFilter'");
+
+    // Debug tambahan untuk memastikan data users
+    if (empty($users)) {
+        error_log("WARNING: No users found with current filters");
+        // Coba query tanpa filter untuk debug
+        $debugStmt = $conn->query("SELECT COUNT(*) FROM users");
+        $debugCount = $debugStmt->fetchColumn();
+        error_log("DEBUG: Total users without filter: " . $debugCount);
+    }
 
 } catch (Exception $e) {
     error_log("Error di Users Admin: " . $e->getMessage());
+    error_log("Error trace: " . $e->getTraceAsString());
     $users = [];
     $totalUsers = 0;
     $totalAdmins = 0;
@@ -120,13 +155,13 @@ if (isset($_SESSION['user_management_message'])) {
         <header class="bg-white shadow-sm border-b border-gray-200">
             <div class="px-6 py-4">
                 <h1 class="text-2xl font-bold text-gray-900">Kelola Pengguna</h1>
-                <p class="text-gray-600 mt-1">Manajemen pengguna sistem Corner Bites SIA</p>
+                <p class="text-gray-600 mt-1">Manajemen pengguna sistem administrasi</p>
             </div>
         </header>
 
         <main class="flex-1 overflow-x-hidden overflow-y-auto bg-gradient-to-br from-gray-50 to-gray-100 p-6">
             <div class="max-w-7xl mx-auto space-y-6">
-                
+
                 <?php if ($message): ?>
                     <div class="<?php echo $message_type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'; ?> border rounded-lg p-4 shadow-sm alert-auto-hide">
                         <div class="flex items-center">
@@ -142,50 +177,7 @@ if (isset($_SESSION['user_management_message'])) {
                     </div>
                 <?php endif; ?>
 
-                <!-- Statistics Cards -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <h3 class="text-lg font-semibold text-gray-700">Total Pengguna</h3>
-                                <p class="text-3xl font-bold text-blue-600 mt-2"><?php echo $totalUsers; ?></p>
-                            </div>
-                            <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                                <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
-                                </svg>
-                            </div>
-                        </div>
-                    </div>
 
-                    <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <h3 class="text-lg font-semibold text-gray-700">Admin</h3>
-                                <p class="text-3xl font-bold text-purple-600 mt-2"><?php echo $totalAdmins; ?></p>
-                            </div>
-                            <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                                <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 0 00-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
-                                </svg>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <h3 class="text-lg font-semibold text-gray-700">User Biasa</h3>
-                                <p class="text-3xl font-bold text-green-600 mt-2"><?php echo $totalRegularUsers; ?></p>
-                            </div>
-                            <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                                <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
-                                </svg>
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
                 <!-- Users Management -->
                 <div class="bg-white rounded-xl shadow-lg border border-gray-100">
@@ -220,7 +212,6 @@ if (isset($_SESSION['user_management_message'])) {
                                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
                                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
                                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal Daftar</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Login Terakhir</th>
                                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
                                         </tr>
                                     </thead>
@@ -252,24 +243,21 @@ if (isset($_SESSION['user_management_message'])) {
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                                     <?php echo date('d M Y', strtotime($user['created_at'])); ?>
                                                 </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                    <?php echo $user['last_login_at'] ? date('d M Y H:i', strtotime($user['last_login_at'])) : 'Belum pernah login'; ?>
-                                                </td>
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                                     <div class="flex space-x-2">
-                                                        <button onclick="editUser(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>', '<?php echo $user['role']; ?>')" 
-                                                                class="text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md transition-colors">
-                                                            Edit
-                                                        </button>
-                                                        <button onclick="showResetPasswordModal(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>')" 
-                                                                class="text-yellow-600 hover:text-yellow-800 bg-yellow-50 hover:bg-yellow-100 px-3 py-1 rounded-md transition-colors">
-                                                            Reset Password
-                                                        </button>
                                                         <?php if ($user['id'] != $_SESSION['user_id']): ?>
+                                                            <button onclick="showResetPasswordModal(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>')" 
+                                                                    class="text-yellow-600 hover:text-yellow-800 bg-yellow-50 hover:bg-yellow-100 px-3 py-1 rounded-md transition-colors">
+                                                                Reset Password
+                                                            </button>
                                                             <button onclick="deleteUser(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>')" 
                                                                     class="text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-3 py-1 rounded-md transition-colors">
                                                                 Hapus
                                                             </button>
+                                                        <?php else: ?>
+                                                            <span class="text-green-600 text-xs font-medium px-3 py-1 bg-green-100 rounded">
+                                                                (Anda)
+                                                            </span>
                                                         <?php endif; ?>
                                                     </div>
                                                 </td>
@@ -447,4 +435,3 @@ if (isset($_SESSION['user_management_message'])) {
 <script src="/cornerbites-sia/assets/js/users.js"></script>
 
 <?php include_once __DIR__ . '/../includes/footer.php'; ?>
-</replit_final_file>

@@ -47,13 +47,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
             $query = "UPDATE users SET username = ?, role = ?";
             $params = [$username, $role];
-
-            if (!empty($password)) {
-                // Hanya update password jika diisi
-                $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-                $query .= ", password = ?";
-                $params[] = $hashed_password;
-            }
             $query .= " WHERE id = ?";
             $params[] = $user_id;
 
@@ -93,7 +86,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
 
             $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $conn->prepare("INSERT INTO users (username, password, role) VALUES (?, ?, ?)");
+            $stmt = $conn->prepare("INSERT INTO users (username, password, role, must_change_password) VALUES (?, ?, ?, 1)");
             if ($stmt->execute([$username, $hashed_password, $role])) {
                 $conn->commit();
                 // Log create user activity

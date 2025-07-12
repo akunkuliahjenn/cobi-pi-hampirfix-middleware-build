@@ -50,6 +50,7 @@ class Database {
         } catch(PDOException $e) {
             // Tangani error koneksi database
             error_log("Koneksi database gagal: " . $e->getMessage()); // Catat error ke log
+            error_log("Database details - Host: " . $this->host . ", DB: " . $this->db_name . ", User: " . $this->username);
             die("Koneksi database gagal: " . $e->getMessage()); // Hentikan skrip jika koneksi sangat krusial
         }
 
