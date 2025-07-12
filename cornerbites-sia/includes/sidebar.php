@@ -84,14 +84,14 @@ $current_dir = basename(dirname($_SERVER['PHP_SELF']));
             <div class="space-y-1">
                 <a href="/cornerbites-sia/admin/dashboard.php" class="flex items-center py-3 px-4 rounded-lg text-gray-700 hover:bg-gray-50 transition-all duration-200 group <?php echo ($current_page == 'dashboard.php' && $current_dir == 'admin') ? 'bg-blue-50 text-blue-600 border-r-4 border-blue-600' : ''; ?>">
                     <svg class="w-5 h-5 mr-3 text-gray-500 group-hover:text-gray-700 <?php echo ($current_page == 'dashboard.php' && $current_dir == 'admin') ? 'text-blue-600' : ''; ?>" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.515-1.378 2.053-1.378 2.568 0L15.34 9.17c.338.903.882 1.63 1.64 2.11l4.897 2.915c1.378.818 1.378 2.316 0 3.134l-4.897 2.915c-.758.48-1.302 1.207-1.64 2.11L12.893 21.683c-.515 1.378-2.053 1.378-2.568 0L7.66 16.83c-.338-.903-.882-1.63-1.64-2.11l-4.897-2.915c-1.378-.818-1.378-2.316 0-3.134l4.897-2.915c.758-.48 1.302-1.207 1.64-2.11L10.325 4.317z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
                     </svg>
-                    Admin Dashboard
+                    Dashboard
                 </a>
 
                 <a href="/cornerbites-sia/admin/users.php" class="flex items-center py-3 px-4 rounded-lg text-gray-700 hover:bg-gray-50 transition-all duration-200 group <?php echo ($current_page == 'users.php') ? 'bg-blue-50 text-blue-600 border-r-4 border-blue-600' : ''; ?>">
                     <svg class="w-5 h-5 mr-3 text-gray-500 group-hover:text-gray-700 <?php echo ($current_page == 'users.php') ? 'text-blue-600' : ''; ?>" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M12 20a9 9 0 100-18 9 9 0 000 18zm-2-9a2 2 0 110-4 2 2 0 010 4zm7 0a2 2 0 110-4 2 2 0 010 4zm-7 7a2 2 0 110-4 2 2 0 010 4zm7 0a2 2 0 110-4 2 2 0 010 4z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
                     </svg>
                     Kelola Pengguna
                 </a>

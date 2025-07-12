@@ -1,6 +1,7 @@
+
 <?php
 // admin/users.php
-// Halaman untuk admin mengelola data pengguna (view, tambah, edit, hapus).
+// Halaman untuk admin mengelola data pengguna (view, edit, hapus).
 
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../config/db.php';
@@ -16,38 +17,70 @@ $users = [];
 $totalUsers = 0;
 $totalAdmins = 0;
 $totalRegularUsers = 0;
-$recentUsers = [];
-$userStats = [];
+
+// Pagination
+$page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$limit = isset($_GET['limit']) ? max(5, min(50, intval($_GET['limit']))) : 10; // Default 10, min 5, max 50
+$offset = ($page - 1) * $limit;
+$totalPages = 0;
+
+// Search dan Filter
+$search = isset($_GET['search']) ? trim($_GET['search']) : '';
+$roleFilter = isset($_GET['role']) ? trim($_GET['role']) : '';
 
 try {
     $conn = $db;
 
-    // Ambil semua pengguna
-    $stmt = $conn->query("SELECT id, username, role, created_at FROM users ORDER BY created_at DESC");
-    $users = $stmt->fetchAll();
+    // Build WHERE clause untuk search dan filter
+    $whereConditions = [];
+    $params = [];
 
-    // Hitung statistik
-    $totalUsers = count($users);
-    $totalAdmins = count(array_filter($users, function($user) { return $user['role'] === 'admin'; }));
-    $totalRegularUsers = count(array_filter($users, function($user) { return $user['role'] === 'user'; }));
+    if (!empty($search)) {
+        $whereConditions[] = "username LIKE ?";
+        $params[] = "%$search%";
+    }
 
-    // Ambil 5 pengguna terbaru
-    $recentUsers = array_slice($users, 0, 5);
+    if (!empty($roleFilter)) {
+        $whereConditions[] = "role = ?";
+        $params[] = $roleFilter;
+    }
 
-    // Statistik berdasarkan bulan registrasi (3 bulan terakhir)
-    $stmtStats = $conn->query("
-        SELECT 
-            strftime('%Y-%m', created_at) as month,
-            COUNT(*) as count
-        FROM users 
-        WHERE created_at >= date('now', '-3 months')
-        GROUP BY strftime('%Y-%m', created_at)
-        ORDER BY month DESC
-    ");
-    $userStats = $stmtStats->fetchAll();
+    $whereClause = !empty($whereConditions) ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
+
+    // Hitung total records
+    $stmtCount = $conn->prepare("SELECT COUNT(*) FROM users $whereClause");
+    if (!empty($params)) {
+        $stmtCount->execute($params);
+    } else {
+        $stmtCount->execute();
+    }
+    $totalRecords = $stmtCount->fetchColumn();
+    $totalPages = ceil($totalRecords / $limit);
+
+    // Ambil data users dengan pagination
+    $sql = "SELECT id, username, role, created_at FROM users $whereClause ORDER BY created_at DESC LIMIT ? OFFSET ?";
+    $stmt = $conn->prepare($sql);
+    $paramsWithLimit = array_merge($params, [$limit, $offset]);
+    $stmt->execute($paramsWithLimit);
+    $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Statistik untuk cards
+    $stmtStats = $conn->query("SELECT role, COUNT(*) as count FROM users GROUP BY role");
+    $roleStats = $stmtStats->fetchAll(PDO::FETCH_KEY_PAIR);
+    
+    $totalUsers = array_sum($roleStats);
+    $totalAdmins = $roleStats['admin'] ?? 0;
+    $totalRegularUsers = $roleStats['user'] ?? 0;
+
+    // Debug: Log query info
+    error_log("Users query: Total records = $totalRecords, Users fetched = " . count($users));
 
 } catch (PDOException $e) {
     error_log("Error di Admin Users: " . $e->getMessage());
+    $totalUsers = 0;
+    $totalAdmins = 0;
+    $totalRegularUsers = 0;
+    $users = [];
 }
 
 // Pesan sukses atau error
@@ -135,155 +168,165 @@ if (isset($_SESSION['user_management_message'])) {
                     </div>
                 </div>
 
-                <!-- Quick Actions -->
+                <!-- Search dan Filter -->
                 <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Aksi Cepat</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <button onclick="showAddUserModal()" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                            </svg>
-                            <span>Tambah Pengguna</span>
-                        </button>
-
-                        <button onclick="exportUsers()" class="bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                            </svg>
-                            <span>Export Data</span>
-                        </button>
-
-                        <button onclick="showUserStats()" class="bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                            </svg>
-                            <span>Lihat Statistik</span>
-                        </button>
-
-                        <button onclick="bulkActions()" class="bg-orange-600 hover:bg-orange-700 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-                            </svg>
-                            <span>Aksi Massal</span>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Recent Users -->
-                <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
-                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Pengguna Terbaru</h3>
-                    <div class="space-y-3">
-                        <?php foreach ($recentUsers as $user): ?>
-                            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                                <div class="flex items-center space-x-3">
-                                    <div class="w-10 h-10 bg-gradient-to-r from-blue-400 to-purple-500 rounded-full flex items-center justify-center">
-                                        <span class="text-white font-semibold text-sm"><?php echo strtoupper(substr($user['username'], 0, 1)); ?></span>
-                                    </div>
-                                    <div>
-                                        <p class="font-medium text-gray-900"><?php echo htmlspecialchars($user['username']); ?></p>
-                                        <p class="text-sm text-gray-500"><?php echo ucfirst($user['role']); ?></p>
-                                    </div>
-                                </div>
-                                <div class="text-right">
-                                    <p class="text-sm text-gray-500"><?php echo date('d M Y', strtotime($user['created_at'])); ?></p>
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
+                        <div class="flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 md:space-x-4">
+                            <div class="relative">
+                                <input type="text" id="searchUser" placeholder="Cari pengguna..." 
+                                       value="<?php echo htmlspecialchars($search); ?>"
+                                       class="w-full md:w-64 pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <div class="absolute inset-y-0 left-0 pl-3 flex items-center">
+                                    <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                    </svg>
                                 </div>
                             </div>
-                        <?php endforeach; ?>
+                            <select id="filterRole" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">Semua Role</option>
+                                <option value="admin" <?php echo $roleFilter === 'admin' ? 'selected' : ''; ?>>Admin</option>
+                                <option value="user" <?php echo $roleFilter === 'user' ? 'selected' : ''; ?>>User</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <label for="limitSelect" class="text-sm font-medium text-gray-700">Data per halaman:</label>
+                            <select id="limitSelect" class="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                                <option value="5" <?php echo $limit == 5 ? 'selected' : ''; ?>>5</option>
+                                <option value="10" <?php echo $limit == 10 ? 'selected' : ''; ?>>10</option>
+                                <option value="20" <?php echo $limit == 20 ? 'selected' : ''; ?>>20</option>
+                                <option value="50" <?php echo $limit == 50 ? 'selected' : ''; ?>>50</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Daftar Semua Pengguna -->
                 <div class="bg-white rounded-xl shadow-lg border border-gray-100">
                     <div class="p-6 border-b border-gray-200">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-gray-800">Semua Pengguna</h3>
-                            <div class="flex items-center space-x-3">
-                                <input type="text" id="searchUser" placeholder="Cari pengguna..." class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <select id="filterRole" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                    <option value="">Semua Role</option>
-                                    <option value="admin">Admin</option>
-                                    <option value="user">User</option>
-                                </select>
-                            </div>
-                        </div>
+                        <h3 class="text-xl font-semibold text-gray-800">Daftar Pengguna</h3>
+                        <p class="text-gray-600 text-sm mt-1">Menampilkan <?php echo count($users); ?> dari <?php echo $totalRecords; ?> pengguna</p>
                     </div>
 
-                    <div class="overflow-x-auto">
-                        <table class="w-full" id="usersTable">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        <input type="checkbox" id="selectAll" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                                    </th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal Daftar</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
-                                </tr>
-                            </thead>
-                            <tbody class="bg-white divide-y divide-gray-200">
-                                <?php foreach ($users as $user): ?>
-                                    <tr class="hover:bg-gray-50 user-row" data-username="<?php echo htmlspecialchars($user['username']); ?>" data-role="<?php echo htmlspecialchars($user['role']); ?>">
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <input type="checkbox" class="user-checkbox rounded border-gray-300 text-blue-600 focus:ring-blue-500" value="<?php echo $user['id']; ?>">
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                            <?php echo htmlspecialchars($user['id']); ?>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <div class="flex items-center">
-                                                <div class="w-8 h-8 bg-gradient-to-r from-blue-400 to-purple-500 rounded-full flex items-center justify-center mr-3">
-                                                    <span class="text-white font-semibold text-xs"><?php echo strtoupper(substr($user['username'], 0, 1)); ?></span>
-                                                </div>
-                                                <div>
-                                                    <div class="text-sm font-medium text-gray-900"><?php echo htmlspecialchars($user['username']); ?></div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <span class="px-2 py-1 text-xs font-semibold rounded-full <?php echo $user['role'] === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'; ?>">
-                                                <?php echo ucfirst($user['role']); ?>
-                                            </span>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            <?php echo date('d M Y H:i', strtotime($user['created_at'])); ?>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                                Aktif
-                                            </span>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                            <div class="flex items-center space-x-2">
-                                                <button onclick="editUser(<?php echo htmlspecialchars(json_encode($user)); ?>)" class="text-blue-600 hover:text-blue-900 font-medium">
-                                                    Edit
-                                                </button>
-                                                <?php if ($user['id'] != $_SESSION['user_id']): ?>
-                                                    <button onclick="deleteUser(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>')" class="text-red-600 hover:text-red-900 font-medium">
-                                                        Hapus
-                                                    </button>
-                                                <?php endif; ?>
-                                            </div>
-                                        </td>
+                    <?php if (empty($users)): ?>
+                        <div class="p-12 text-center">
+                            <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
+                            </svg>
+                            <h3 class="mt-2 text-sm font-medium text-gray-900">Tidak ada pengguna</h3>
+                            <p class="mt-1 text-sm text-gray-500">
+                                <?php echo !empty($search) || !empty($roleFilter) ? 'Tidak ada pengguna yang sesuai dengan kriteria pencarian.' : 'Belum ada pengguna yang terdaftar.'; ?>
+                            </p>
+                        </div>
+                    <?php else: ?>
+                        <div class="overflow-x-auto" id="usersTableContainer">
+                            <table class="w-full" id="usersTable">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal Daftar</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
                                     </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                    <?php foreach ($users as $user): ?>
+                                        <tr class="hover:bg-gray-50 user-row" data-username="<?php echo htmlspecialchars($user['username']); ?>" data-role="<?php echo htmlspecialchars($user['role']); ?>">
+                                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                                <?php echo htmlspecialchars($user['id']); ?>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <div class="flex items-center">
+                                                    <div class="w-8 h-8 bg-gradient-to-r from-blue-400 to-purple-500 rounded-full flex items-center justify-center mr-3">
+                                                        <span class="text-white font-semibold text-xs"><?php echo strtoupper(substr($user['username'], 0, 1)); ?></span>
+                                                    </div>
+                                                    <div>
+                                                        <div class="text-sm font-medium text-gray-900"><?php echo htmlspecialchars($user['username']); ?></div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <span class="px-2 py-1 text-xs font-semibold rounded-full <?php echo $user['role'] === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'; ?>">
+                                                    <?php echo ucfirst($user['role']); ?>
+                                                </span>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                <?php echo date('d M Y H:i', strtotime($user['created_at'])); ?>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                                    Aktif
+                                                </span>
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                                <div class="flex items-center space-x-2">
+                                                    <button onclick="editUser(<?php echo htmlspecialchars(json_encode($user)); ?>)" class="text-blue-600 hover:text-blue-900 font-medium">
+                                                        Edit
+                                                    </button>
+                                                    <?php if ($user['id'] != $_SESSION['user_id']): ?>
+                                                        <button onclick="resetPassword(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>')" class="text-orange-600 hover:text-orange-900 font-medium">
+                                                            Reset Password
+                                                        </button>
+                                                        <button onclick="deleteUser(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>')" class="text-red-600 hover:text-red-900 font-medium">
+                                                            Hapus
+                                                        </button>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Pagination -->
+                        <?php if ($totalPages > 1): ?>
+                            <div class="px-6 py-3 border-t border-gray-200 bg-gray-50">
+                                <div class="flex items-center justify-between">
+                                    <div class="text-sm text-gray-700">
+                                        Menampilkan <span class="font-medium"><?php echo ($offset + 1); ?></span> sampai 
+                                        <span class="font-medium"><?php echo min($offset + $limit, $totalRecords); ?></span> dari 
+                                        <span class="font-medium"><?php echo $totalRecords; ?></span> hasil
+                                    </div>
+                                    <div class="flex space-x-1">
+                                        <?php if ($page > 1): ?>
+                                            <a href="?page=<?php echo ($page - 1) . ($search ? '&search=' . urlencode($search) : '') . ($roleFilter ? '&role=' . urlencode($roleFilter) : '') . '&limit=' . $limit; ?>" 
+                                               class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-l-md hover:bg-gray-50">
+                                                ‹ Sebelumnya
+                                            </a>
+                                        <?php endif; ?>
+
+                                        <?php for ($i = max(1, $page - 2); $i <= min($totalPages, $page + 2); $i++): ?>
+                                            <a href="?page=<?php echo $i . ($search ? '&search=' . urlencode($search) : '') . ($roleFilter ? '&role=' . urlencode($roleFilter) : '') . '&limit=' . $limit; ?>" 
+                                               class="px-3 py-2 text-sm font-medium <?php echo $i == $page ? 'text-blue-600 bg-blue-50 border-blue-500' : 'text-gray-500 bg-white border-gray-300 hover:bg-gray-50'; ?> border">
+                                                <?php echo $i; ?>
+                                            </a>
+                                        <?php endfor; ?>
+
+                                        <?php if ($page < $totalPages): ?>
+                                            <a href="?page=<?php echo ($page + 1) . ($search ? '&search=' . urlencode($search) : '') . ($roleFilter ? '&role=' . urlencode($roleFilter) : '') . '&limit=' . $limit; ?>" 
+                                               class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-r-md hover:bg-gray-50">
+                                                Selanjutnya ›
+                                            </a>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+                    <?php endif; ?>
                 </div>
             </div>
         </main>
     </div>
 </div>
 
-<!-- Modal Tambah/Edit User -->
+<!-- Modal Edit User -->
 <div id="userModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
     <div class="flex items-center justify-center min-h-screen p-4">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-md">
             <div class="p-6">
-                <h3 class="text-lg font-semibold text-gray-900 mb-4" id="modalTitle">Tambah Pengguna Baru</h3>
+                <h3 class="text-lg font-semibold text-gray-900 mb-4" id="modalTitle">Edit Pengguna</h3>
                 <form id="userForm" action="/cornerbites-sia/process/kelola_user.php" method="POST">
                     <input type="hidden" name="user_id" id="user_id_to_edit" value="">
                     <div class="space-y-4">
@@ -292,9 +335,9 @@ if (isset($_SESSION['user_management_message'])) {
                             <input type="text" id="username" name="username" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
                         </div>
                         <div>
-                            <label for="password" class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                            <label for="password" class="block text-sm font-medium text-gray-700 mb-1">Password Baru</label>
                             <input type="password" id="password" name="password" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <p class="text-xs text-gray-500 mt-1" id="passwordHelp">Minimal 6 karakter</p>
+                            <p class="text-xs text-gray-500 mt-1" id="passwordHelp">Kosongkan jika tidak ingin mengubah password</p>
                         </div>
                         <div>
                             <label for="role" class="block text-sm font-medium text-gray-700 mb-1">Role</label>
@@ -318,224 +361,78 @@ if (isset($_SESSION['user_management_message'])) {
     </div>
 </div>
 
+<!-- Reset Password Modal -->
+<div id="resetPasswordModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden">
+    <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+        <div class="mt-3 text-center">
+            <h3 class="text-lg leading-6 font-medium text-gray-900">Reset Password</h3>
+            <div class="mt-2 px-7 py-3">
+                <p class="text-sm text-gray-500">Reset password untuk: <span id="resetUsername" class="font-semibold"></span></p>
+            </div>
+            <form action="/cornerbites-sia/admin/reset_password.php" method="POST">
+                <input type="hidden" id="resetUserId" name="user_id" value="">
+                <div class="mt-4">
+                    <input type="password" name="new_password" placeholder="Password baru (min. 6 karakter)" 
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div>
+                <div class="items-center px-4 py-3">
+                    <button type="submit" class="px-4 py-2 bg-blue-500 text-white text-base font-medium rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300">
+                        Reset Password
+                    </button>
+                    <button type="button" onclick="hideResetPasswordModal()" class="ml-3 px-4 py-2 bg-gray-500 text-white text-base font-medium rounded-md shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                        Batal
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="/cornerbites-sia/assets/js/admin.js"></script>
 <script>
-// Search and Filter Functions
+// Search real-time dengan AJAX
+let searchTimeout;
 document.getElementById('searchUser').addEventListener('input', function() {
-    filterUsers();
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(function() {
+        performSearch();
+    }, 300);
 });
 
 document.getElementById('filterRole').addEventListener('change', function() {
-    filterUsers();
+    performSearch();
 });
 
-function filterUsers() {
-    const searchTerm = document.getElementById('searchUser').value.toLowerCase();
-    const roleFilter = document.getElementById('filterRole').value;
-    const rows = document.querySelectorAll('.user-row');
-
-    rows.forEach(row => {
-        const username = row.dataset.username.toLowerCase();
-        const role = row.dataset.role;
-
-        const matchesSearch = username.includes(searchTerm);
-        const matchesRole = !roleFilter || role === roleFilter;
-
-        row.style.display = matchesSearch && matchesRole ? '' : 'none';
-    });
-}
-
-// Modal Functions
-function showAddUserModal() {
-    document.getElementById('modalTitle').textContent = 'Tambah Pengguna Baru';
-    document.getElementById('userForm').reset();
-    document.getElementById('user_id_to_edit').value = '';
-    document.getElementById('passwordHelp').textContent = 'Minimal 6 karakter';
-    document.getElementById('submitBtn').textContent = 'Simpan';
-    document.getElementById('userModal').classList.remove('hidden');
-}
-
-function editUser(user) {
-    document.getElementById('modalTitle').textContent = 'Edit Pengguna';
-    document.getElementById('user_id_to_edit').value = user.id;
-    document.getElementById('username').value = user.username;
-    document.getElementById('role').value = user.role;
-    document.getElementById('password').value = '';
-    document.getElementById('passwordHelp').textContent = 'Kosongkan jika tidak ingin mengubah password';
-    document.getElementById('submitBtn').textContent = 'Update';
-    document.getElementById('userModal').classList.remove('hidden');
-}
-
-function closeModal() {
-    document.getElementById('userModal').classList.add('hidden');
-}
-
-function deleteUser(userId, username) {
-    if (confirm(`Apakah Anda yakin ingin menghapus pengguna "${username}"?`)) {
-        window.location.href = `/cornerbites-sia/process/hapus_user.php?id=${userId}`;
-    }
-}
-
-// Bulk Actions
-document.getElementById('selectAll').addEventListener('change', function() {
-    const checkboxes = document.querySelectorAll('.user-checkbox');
-    checkboxes.forEach(checkbox => {
-        checkbox.checked = this.checked;
-    });
-
-     // Aktifkan/nonaktifkan tombol aksi massal berdasarkan jumlah yang dipilih
-    const selectedCount = document.querySelectorAll('.user-checkbox:checked').length;
-    document.getElementById('selectedCount').textContent = selectedCount;
-    document.getElementById('bulkActionBtn').disabled = selectedCount === 0;
+document.getElementById('limitSelect').addEventListener('change', function() {
+    performSearch();
 });
 
-function bulkActions() {
-    const selectedUsers = Array.from(document.querySelectorAll('.user-checkbox:checked')).map(cb => cb.value);
-    if (selectedUsers.length === 0) {
-        alert('Pilih setidaknya satu pengguna untuk melakukan aksi massal.');
-        return;
-    }
-
-    const action = prompt('Pilih aksi:\n1. Ubah role menjadi "user"\n2. Ubah role menjadi "admin"\n3. Hapus pengguna terpilih\n\nMasukkan nomor pilihan:');
-
-    if (action === '1' || action === '2') {
-        const newRole = action === '1' ? 'user' : 'admin';
-        if (confirm(`Ubah role ${selectedUsers.length} pengguna terpilih menjadi "${newRole}"?`)) {
-            // Gunakan kelola_user.php yang sudah ada untuk update role
-            selectedUsers.forEach(userId => {
-                // Ambil data user terlebih dahulu
-                const userRow = document.querySelector(`input[value="${userId}"]`).closest('tr');
-                const username = userRow.querySelector('td:nth-child(3)').textContent.trim();
-
-                // Buat form untuk setiap user
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = '/cornerbites-sia/process/kelola_user.php';
-                form.style.display = 'none';
-
-                const userIdInput = document.createElement('input');
-                userIdInput.type = 'hidden';
-                userIdInput.name = 'user_id';
-                userIdInput.value = userId;
-
-                const usernameInput = document.createElement('input');
-                usernameInput.type = 'hidden';
-                usernameInput.name = 'username';
-                usernameInput.value = username;
-
-                const roleInput = document.createElement('input');
-                roleInput.type = 'hidden';
-                roleInput.name = 'role';
-                roleInput.value = newRole;
-
-                form.appendChild(userIdInput);
-                form.appendChild(usernameInput);
-                form.appendChild(roleInput);
-                document.body.appendChild(form);
-                form.submit();
-            });
-        }
-    } else if (action === '3') {
-        if (confirm(`Apakah Anda yakin ingin menghapus ${selectedUsers.length} pengguna terpilih?`)) {
-            // Gunakan hapus_user.php yang sudah ada
-            if (selectedUsers.includes('<?php echo $_SESSION['user_id']; ?>')) {
-                alert('Anda tidak bisa menghapus akun Anda sendiri!');
-                return;
-            }
-
-            selectedUsers.forEach((userId, index) => {
-                setTimeout(() => {
-                    window.location.href = `/cornerbites-sia/process/hapus_user.php?id=${userId}`;
-                }, index * 100); // Delay untuk menghindari konflik
-            });
-        }
-    }
-}
-
-function exportUsers() {
-    window.location.href = '/cornerbites-sia/process/export_users.php';
-}
-
-function showUserStats() {
-    const statsData = <?php echo json_encode($userStats); ?>;
-    let statsText = 'Statistik Pendaftaran Pengguna (3 Bulan Terakhir):\n\n';
-
-    if (statsData.length > 0) {
-        statsData.forEach(stat => {
-            statsText += `${stat.month}: ${stat.count} pengguna\n`;
-        });
+function performSearch() {
+    const search = document.getElementById('searchUser').value;
+    const role = document.getElementById('filterRole').value;
+    const limit = document.getElementById('limitSelect').value;
+    
+    // Update URL tanpa reload
+    const url = new URL(window.location);
+    if (search) {
+        url.searchParams.set('search', search);
     } else {
-        statsText += 'Belum ada data statistik.';
+        url.searchParams.delete('search');
     }
-
-    alert(statsText);
-}
-
-// Close modal when clicking outside
-document.getElementById('userModal').addEventListener('click', function(e) {
-    if (e.target === this) {
-        closeModal();
+    
+    if (role) {
+        url.searchParams.set('role', role);
+    } else {
+        url.searchParams.delete('role');
     }
-});
-
-function toggleBulkMenu() {
-    document.getElementById('bulkMenu').classList.toggle('hidden');
-}
-
-function bulkChangeRole(newRole) {
-    const selectedUsers = Array.from(document.querySelectorAll('.user-checkbox:checked')).map(cb => cb.value);
-    if (confirm(`Ubah role ${selectedUsers.length} pengguna terpilih menjadi "${newRole}"?`)) {
-        // Gunakan kelola_user.php yang sudah ada untuk update role
-        selectedUsers.forEach(userId => {
-            // Ambil data user terlebih dahulu
-            const userRow = document.querySelector(`input[value="${userId}"]`).closest('tr');
-            const username = userRow.querySelector('td:nth-child(3)').textContent.trim();
-
-            // Buat form untuk setiap user
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = '/cornerbites-sia/process/kelola_user.php';
-            form.style.display = 'none';
-
-            const userIdInput = document.createElement('input');
-            userIdInput.type = 'hidden';
-            userIdInput.name = 'user_id';
-            userIdInput.value = userId;
-
-            const usernameInput = document.createElement('input');
-            usernameInput.type = 'hidden';
-            usernameInput.name = 'username';
-            usernameInput.value = username;
-
-            const roleInput = document.createElement('input');
-            roleInput.type = 'hidden';
-            roleInput.name = 'role';
-            roleInput.value = newRole;
-
-            form.appendChild(userIdInput);
-            form.appendChild(usernameInput);
-            form.appendChild(roleInput);
-            document.body.appendChild(form);
-            form.submit();
-        });
-    }
-}
-
-function bulkDeleteSelected() {
-    const selectedUsers = Array.from(document.querySelectorAll('.user-checkbox:checked')).map(cb => cb.value);
-    if (confirm(`Apakah Anda yakin ingin menghapus ${selectedUsers.length} pengguna terpilih?`)) {
-        // Gunakan hapus_user.php yang sudah ada
-        if (selectedUsers.includes('<?php echo $_SESSION['user_id']; ?>')) {
-            alert('Anda tidak bisa menghapus akun Anda sendiri!');
-            return;
-        }
-
-        selectedUsers.forEach((userId, index) => {
-            setTimeout(() => {
-                window.location.href = `/cornerbites-sia/process/hapus_user.php?id=${userId}`;
-            }, index * 100); // Delay untuk menghindari konflik
-        });
-    }
+    
+    url.searchParams.set('limit', limit);
+    url.searchParams.delete('page'); // Reset ke halaman 1
+    window.history.replaceState({}, '', url);
+    
+    // Reload halaman untuk menampilkan hasil pencarian
+    window.location.reload();
 }
 </script>
-
-<?php include_once __DIR__ . '/../includes/footer.php'; ?>
+</body>
+</html>

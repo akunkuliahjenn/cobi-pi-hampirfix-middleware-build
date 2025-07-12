@@ -38,7 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $conn = $db; // Menggunakan koneksi $db dari db.php
 
         // Siapkan query untuk mencari user berdasarkan username dan mengambil role
-        $stmt = $conn->prepare("SELECT id, username, password, role FROM users WHERE username = ?");
+        $stmt = $conn->prepare("SELECT id, username, password, role, must_change_password FROM users WHERE username = ?");
         $stmt->execute([$username]);
         $user = $stmt->fetch();
 
@@ -64,6 +64,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
             // Log successful login (optional)
             error_log("Successful login: User ID {$user['id']} ({$user['username']}) from IP {$_SERVER['REMOTE_ADDR']}");
+
+            // Cek apakah user harus ganti password
+            if (isset($user['must_change_password']) && $user['must_change_password'] == 1) {
+                $_SESSION['must_change_password'] = true;
+                header("Location: /cornerbites-sia/auth/change_password.php");
+                exit();
+            }
 
             // Redirect sesuai role
             if ($user['role'] === 'admin') {
