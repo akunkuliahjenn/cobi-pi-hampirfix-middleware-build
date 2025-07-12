@@ -408,13 +408,14 @@ if (isset($_SESSION['user_management_message'])) {
                 <form action="/cornerbites-sia/admin/reset_password.php" method="POST">
                     <input type="hidden" name="user_id" id="resetUserId" value="">
                     <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Password Baru</label>
-                            <input type="password" name="new_password" required 
-                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <p class="text-xs text-gray-500 mt-1">Minimal 6 karakter</p>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Password Temporary</label>
+                                <input type="password" name="new_password" required 
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                       placeholder="Masukkan password temporary">
+                                <p class="text-xs text-gray-500 mt-1">Minimal 6 karakter. User akan diminta ganti password setelah login.</p>
+                            </div>
                         </div>
-                    </div>
                     <div class="flex justify-end space-x-3 mt-6">
                         <button type="button" onclick="hideResetPasswordModal()" 
                                 class="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">

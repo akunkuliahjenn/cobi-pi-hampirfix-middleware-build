@@ -107,14 +107,25 @@ function hideUserModal() {
 
 // Show reset password modal
 function showResetPasswordModal(userId, username) {
-    document.getElementById('resetUserId').value = userId;
-    document.getElementById('resetUsername').textContent = username;
-    document.getElementById('resetPasswordModal').classList.remove('hidden');
+    const modal = document.getElementById('resetPasswordModal');
+    const userIdInput = document.getElementById('resetUserId');
+    const usernameSpan = document.getElementById('resetUsername');
+
+    if (modal && userIdInput && usernameSpan) {
+        userIdInput.value = userId;
+        usernameSpan.textContent = username;
+        modal.classList.remove('hidden');
+    }
 }
 
 // Hide reset password modal
 function hideResetPasswordModal() {
-    document.getElementById('resetPasswordModal').classList.add('hidden');
+    const modal = document.getElementById('resetPasswordModal');
+    if (modal) {
+        modal.classList.add('hidden');
+        // Reset form
+        document.querySelector('#resetPasswordModal form').reset();
+    }
 }
 
 // Reset password function (updated)
@@ -142,14 +153,8 @@ function deleteUser(userId, username) {
 
 // Close modal when clicking outside
 document.addEventListener('click', function(event) {
-    const userModal = document.getElementById('userModal');
-    const resetModal = document.getElementById('resetPasswordModal');
-    
-    if (event.target === userModal) {
-        hideUserModal();
-    }
-    
-    if (event.target === resetModal) {
+    const modal = document.getElementById('resetPasswordModal');
+    if (modal && event.target === modal) {
         hideResetPasswordModal();
     }
 });

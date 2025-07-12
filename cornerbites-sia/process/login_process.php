@@ -54,6 +54,28 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $stmt->execute([$username]);
         $user = $stmt->fetch();
 
+        // Debug untuk troubleshooting login - enhanced logging
+        if ($user) {
+            error_log("Login Debug - User found: ID {$user['id']}, Username: {$user['username']}");
+            error_log("Login Debug - Input password: '$password'");
+            error_log("Login Debug - Input password length: " . strlen($password));
+            error_log("Login Debug - Stored hash: " . substr($user['password'], 0, 50) . "...");
+            error_log("Login Debug - Must change password: " . ($user['must_change_password'] ?? 'NULL'));
+            error_log("Login Debug - Hash algorithm: " . (strpos($user['password'], '$2y$') === 0 ? 'bcrypt $2y$' : 'other'));
+
+            $password_match = password_verify($password, $user['password']);
+            error_log("Login Debug - Password verification result: " . ($password_match ? 'SUCCESS' : 'FAILED'));
+            
+            // Additional verification test
+            if (!$password_match) {
+                error_log("Login Debug - Attempting manual verification...");
+                $manual_hash = password_hash($password, PASSWORD_DEFAULT);
+                error_log("Login Debug - New hash for same password: " . substr($manual_hash, 0, 50) . "...");
+            }
+        } else {
+            error_log("Login Debug - NO USER FOUND for username: '$username'");
+        }
+
         // Verifikasi user dan password
         if ($user && password_verify($password, $user['password'])) {
 
