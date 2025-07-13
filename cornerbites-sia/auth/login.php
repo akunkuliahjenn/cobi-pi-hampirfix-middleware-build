@@ -20,7 +20,8 @@ if (isset($_SESSION['user_id'])) {
 $error_message = $_SESSION['error_message'] ?? '';
 unset($_SESSION['error_message']);
 
-$success_message = $_SESSION['success_message_register'] ?? '';
+$success_message = $_SESSION['success_message'] ?? $_SESSION['success_message_register'] ?? '';
+unset($_SESSION['success_message']);
 unset($_SESSION['success_message_register']);
 ?>
 
